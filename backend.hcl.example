@@ -1,0 +1,5 @@
+resource_group_name  = "rg-tfstate"
+storage_account_name = "sttfstateXXXXXXXX"   # valeur générée par bootstrap-backend.sh
+container_name       = "tfstate"
+key                  = "aks-phase1.tfstate"
+use_azuread_auth     = true
