@@ -14,12 +14,28 @@ resource "azurerm_user_assigned_identity" "github" {
 # son claim "sub" correspond exactement. Le subject par environnement GitHub
 # (et non par branche) permet d'ajouter des protection rules côté GitHub
 # (reviewers, branches autorisées) sans toucher à Azure.
+#
+# Format "immutable" du subject (owner@<id>/repo@<id>) : les IDs numériques ne
+# changent jamais, contrairement aux noms. Un repo supprimé puis recréé sous le
+# même nom (par toi ou par un tiers qui récupère le nom) n'obtient donc pas de
+# token. Sans les IDs, retombe sur le format classique owner/repo.
+locals {
+  github_owner = split("/", var.github_repository)[0]
+  github_repo  = split("/", var.github_repository)[1]
+
+  github_subject_repo = (
+    var.github_repository_ids == null
+    ? var.github_repository
+    : "${local.github_owner}@${var.github_repository_ids.owner_id}/${local.github_repo}@${var.github_repository_ids.repository_id}"
+  )
+}
+
 resource "azurerm_federated_identity_credential" "github" {
   name                      = "github-${var.environment}"
   user_assigned_identity_id = azurerm_user_assigned_identity.github.id
   audience                  = ["api://AzureADTokenExchange"]
   issuer                    = "https://token.actions.githubusercontent.com"
-  subject                   = "repo:${var.github_repository}:environment:${var.github_environment}"
+  subject                   = "repo:${local.github_subject_repo}:environment:${var.github_environment}"
 }
 
 # --- Registry ---------------------------------------------------------------

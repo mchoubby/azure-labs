@@ -71,8 +71,9 @@ module "ci" {
   project_name        = var.project_name
   environment         = var.environment
 
-  github_repository  = var.github_repository
-  github_environment = var.environment
+  github_repository     = var.github_repository
+  github_repository_ids = var.github_repository_ids
+  github_environment    = var.environment
 
   acr_id         = module.acr.acr_id
   aks_cluster_id = module.aks.cluster_id

@@ -93,6 +93,15 @@ variable "github_repository" {
   type        = string
 }
 
+variable "github_repository_ids" {
+  description = "IDs numériques GitHub (owner, repo) pour le subject OIDC immutable. Visibles dans le 'subject claim' loggé par azure/login"
+  type = object({
+    owner_id      = number
+    repository_id = number
+  })
+  default = null
+}
+
 variable "app_namespace" {
   description = "Namespace Kubernetes de l'application, seul namespace où la CI peut écrire"
   type        = string

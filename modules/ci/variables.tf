@@ -29,6 +29,15 @@ variable "github_repository" {
   }
 }
 
+variable "github_repository_ids" {
+  description = "IDs numériques GitHub du owner et du repo, si le repo émet des subjects OIDC au format immutable (repo:owner@<id>/repo@<id>:...)"
+  type = object({
+    owner_id      = number
+    repository_id = number
+  })
+  default = null
+}
+
 variable "github_environment" {
   description = "Environnement GitHub Actions dont les jobs peuvent obtenir un token Azure"
   type        = string
