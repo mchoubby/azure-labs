@@ -59,8 +59,6 @@ az role assignment create \
   --scope "${SA_ID}" \
   -o none
 
-az storage account show --name "sttfstate3059d5e4" --resource-group "rg-tfstate" --query id -o tsv
-az role assignment create --assignee "f6bd34c4-bf3d-4a0e-bf48-abbc14a03046" --role "Storage Blob Data Contributor" --scope "/subscriptions/4183c77e-63f1-44b0-9324-dde1ea9143c9/resourceGroups/rg-tfstate/providers/Microsoft.Storage/storageAccounts/sttfstate3059d5e4" -o none
 cat <<EOF
 
 Bootstrap terminé.

@@ -12,8 +12,6 @@ terraform {
     }
   }
 
-  # Phase 2 remplacera ce backend local par un backend "azurerm"
-  # pointant vers un Storage Account dédié au state, avec state locking.
   backend "azurerm" {}
 }
 

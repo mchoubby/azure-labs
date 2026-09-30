@@ -76,6 +76,29 @@ variable "user_node_vm_size" {
   default     = "Standard_D4ds_v6"
 }
 
+variable "admin_object_ids" {
+  description = "Object IDs Azure AD à qui donner les droits admin kubectl sur le cluster (ex: le tien, via az ad signed-in-user show)"
+  type        = list(string)
+  default     = []
+}
+
+variable "acr_public_network_access_enabled" {
+  description = "Endpoint public de l'ACR — requis tant que la CI tourne sur des runners GitHub hébergés"
+  type        = bool
+  default     = true
+}
+
+variable "github_repository" {
+  description = "Dépôt GitHub autorisé à déployer via OIDC, au format owner/repo"
+  type        = string
+}
+
+variable "app_namespace" {
+  description = "Namespace Kubernetes de l'application, seul namespace où la CI peut écrire"
+  type        = string
+  default     = "demo-app"
+}
+
 variable "tags" {
   description = "Tags communs appliqués à toutes les ressources"
   type        = map(string)

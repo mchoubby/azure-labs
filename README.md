@@ -53,3 +53,32 @@ Le cluster est **privé** : l'API server n'a pas d'IP publique. Deux options :
 ## Prochaine étape (Phase 2)
 Migrer le state local vers un backend `azurerm` (Storage Account + state locking),
 et découper ce module en sous-modules réutilisables (`network`, `aks`, `acr`).
+
+---
+
+# Phase 3 — CI/CD GitHub Actions en OIDC
+
+## Ce qui est ajouté
+- `modules/acr` : ACR Premium sans compte admin, Private Endpoint dans
+  `snet-private-endpoints`, zone DNS `privatelink.azurecr.io` liée au VNet,
+  `AcrPull` pour l'identité kubelet.
+- `modules/ci` : identité managée fédérée avec GitHub (aucun secret Azure
+  côté GitHub). Droits : `AcrPush` + `Reader` sur l'ACR, rôle custom limité à
+  `az aks command invoke` sur le cluster, `AKS RBAC Writer` sur le namespace
+  `demo-app` uniquement.
+- `.github/workflows/deploy.yml` : build + scan Trivy sans aucun accès Azure,
+  puis job `deploy` (environnement GitHub `dev`) : push ACR → `kubectl apply`
+  via `az aks command invoke`.
+
+## Mise en place
+```bash
+# 1. Renseigner github_repository = "<owner>/<repo>" dans terraform.tfvars
+terraform plan -out=tfplan && terraform apply tfplan
+
+# 2. Namespace applicatif (une seule fois, en admin — la CI ne peut pas le créer)
+az aks command invoke -g <rg> -n <cluster> --file k8s/namespace.yaml \
+  --command "kubectl apply -f namespace.yaml"
+
+# 3. Côté GitHub : créer l'environnement "dev" et y reporter les variables
+terraform output github_actions_variables
+```

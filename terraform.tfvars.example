@@ -2,6 +2,6 @@ project_name = "aksdemo"
 environment  = "dev"
 location     = "francecentral"
 
-# Ajoute ton IP publique ici si tu veux joindre l'API server privé
-# depuis ton poste sans passer par un bastion (usage dev uniquement).
-# authorized_ip_ranges = ["203.0.113.42/32"]
+admin_object_ids = ["<ton-object-id-azure-ad>"]
+
+github_repository = "<nom-du-repo>"
