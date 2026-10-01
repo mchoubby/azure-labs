@@ -108,6 +108,12 @@ variable "app_namespace" {
   default     = "demo-app"
 }
 
+variable "policy_effect" {
+  description = "Effet des policies Pod Security / images : Audit (mesure) puis Deny (blocage à l'admission)"
+  type        = string
+  default     = "Audit"
+}
+
 variable "tags" {
   description = "Tags communs appliqués à toutes les ressources"
   type        = map(string)

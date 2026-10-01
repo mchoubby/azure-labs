@@ -34,6 +34,10 @@ resource "azurerm_kubernetes_cluster" "main" {
   oidc_issuer_enabled       = true
   workload_identity_enabled = true
 
+  # Add-on Azure Policy : installe Gatekeeper (gatekeeper-system) et applique
+  # les assignments Azure Policy scopés sur ce cluster (modules/policy).
+  azure_policy_enabled = true
+
   identity {
     type         = "UserAssigned"
     identity_ids = [azurerm_user_assigned_identity.aks_control_plane.id]

@@ -81,3 +81,12 @@ module "ci" {
 
   tags = var.tags
 }
+
+module "policy" {
+  source = "./modules/policy"
+
+  aks_cluster_id   = module.aks.cluster_id
+  acr_login_server = module.acr.acr_login_server
+  app_namespaces   = [var.app_namespace]
+  effect           = var.policy_effect
+}

@@ -76,6 +76,15 @@ k8s/deployment.yaml            # manifeste d'exemple, à remplacer par la vraie 
    plus reconstruit (38 HIGH/CRITICAL). Rester sur la branche stable courante
    (`1.30-alpine3.24`) + `apk upgrade` au build.
 
+7. **Exclusions par défaut des initiatives Pod Security Azure incomplètes** :
+   elles n'excluent ni `calico-system`/`tigera-operator` (pods privilégiés,
+   hostNetwork) ni `aks-command` (pods de `az aks command invoke`). En Deny
+   cluster-wide sans ces exclusions : Calico ne redémarre plus, la CI et
+   l'accès admin au cluster privé cassent. Liste complète dans
+   `modules/policy/variables.tf` (`system_namespaces`).
+8. **Cluster stoppé = aucun update possible** sur la ressource AKS (et donc
+   rien de ce qui en dépend dans le graphe Terraform).
+
 ## Compromis assumés, à challenger si possible
 - ~~Contributor sur le cluster pour la CI~~ → remplacé par un rôle custom
   (`managedClusters/read`, `runcommand/action`, `commandResults/read`) +
