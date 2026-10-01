@@ -5,7 +5,8 @@ on:
     branches: [main]
     paths:
       - "app/**"
-      - "k8s/**"
+      # k8s/platform/ est appliqué par un admin, pas par ce pipeline
+      - "k8s/app/**"
       - ".github/workflows/deploy.yml"
   workflow_dispatch:
 
@@ -88,7 +89,7 @@ jobs:
           echo "image=${IMAGE}" >> "${GITHUB_OUTPUT}"
 
       - name: Render manifest
-        working-directory: k8s
+        working-directory: k8s/app
         run: sed -i "s|IMAGE_PLACEHOLDER|${{ steps.push.outputs.image }}|" deployment.yaml
 
       # Le runner hébergé n'a pas de route vers l'API server privé :
@@ -99,13 +100,13 @@ jobs:
       # command invoke renvoie 0 même si la commande distante échoue : le
       # vrai code de retour est dans .exitCode du JSON.
       - name: Deploy (az aks command invoke)
-        working-directory: k8s
+        working-directory: k8s/app
         run: |
           RESULT=$(az aks command invoke \
             --resource-group "${{ vars.AKS_RESOURCE_GROUP }}" \
             --name "${{ vars.AKS_CLUSTER_NAME }}" \
-            --file deployment.yaml \
-            --command "kubectl apply -f deployment.yaml && kubectl rollout status deployment/demo-app -n ${{ vars.APP_NAMESPACE }} --timeout=180s" \
+            --file . \
+            --command "kubectl apply -f . && kubectl rollout status deployment/demo-app -n ${{ vars.APP_NAMESPACE }} --timeout=180s" \
             -o json)
           echo "${RESULT}" | jq -r '.logs'
           EXIT_CODE=$(echo "${RESULT}" | jq -r '.exitCode')

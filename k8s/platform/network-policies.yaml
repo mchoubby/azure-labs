@@ -1,0 +1,62 @@
+# Baseline réseau du namespace demo-app — appliquée par un admin, comme le
+# namespace. Tout est interdit par défaut, puis chaque application ouvre
+# explicitement ses flux entrants (voir k8s/app/network-policy.yaml).
+#
+# Les NetworkPolicies sont additives (union des règles) : une policy
+# applicative ne peut qu'ouvrir, jamais annuler ce deny-all.
+#
+# Le trafic node → pod local (probes kubelet) reste toujours autorisé par
+# la spec Kubernetes, indépendamment de ces policies.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: demo-app
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+# Résolution DNS vers CoreDNS uniquement. La policy est évaluée après le
+# DNAT du Service kube-dns (10.0.0.10), d'où la sélection des pods CoreDNS
+# et non de l'IP du Service.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-egress
+  namespace: demo-app
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+# Egress libre à l'intérieur du namespace : le contrôle fin se fait côté
+# ingress, par l'application qui reçoit le flux. Évite de dupliquer chaque
+# règle des deux côtés. Tout egress hors namespace (Internet, autres
+# namespaces, IMDS, API server) reste interdit.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-same-namespace-egress
+  namespace: demo-app
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector: {}

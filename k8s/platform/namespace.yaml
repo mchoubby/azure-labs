@@ -1,4 +1,4 @@
-# Appliqué une seule fois par un admin (rôle AKS RBAC Cluster Admin), pas par
+# Appliqué par un admin (rôle AKS RBAC Cluster Admin), pas par
 # la CI : l'identité GitHub n'a que le rôle Writer scopé à ce namespace, elle
 # ne peut ni créer ni lire l'objet Namespace lui-même.
 apiVersion: v1
