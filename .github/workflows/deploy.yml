@@ -107,8 +107,8 @@ jobs:
 
       # Le runner hébergé n'a pas de route vers l'API server privé :
       # command invoke fait exécuter kubectl par un pod éphémère dans le
-      # cluster, avec le token Entra de l'identité CI (RBAC Writer sur le
-      # namespace uniquement).
+      # cluster, avec le token Entra de l'identité CI (RBAC Writer et rôle
+      # custom lecture/écriture des ressources personnalisées, limités au namespace).
       #
       # command invoke renvoie 0 même si la commande distante échoue : le
       # vrai code de retour est dans .exitCode du JSON.

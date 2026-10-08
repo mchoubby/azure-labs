@@ -97,3 +97,31 @@ resource "azurerm_role_assignment" "aks_namespace_writer" {
   principal_id                     = azurerm_user_assigned_identity.github.principal_id
   skip_service_principal_aad_check = true
 }
+
+# RBAC Writer ne couvre pas les ressources personnalisées (SecretProviderClass).
+# Sans ABAC, ces DataActions couvrent toutes les ressources personnalisées du
+# namespace ; aucune permission de suppression ni de gestion des CRD.
+resource "azurerm_role_definition" "aks_custom_resources_writer" {
+  name        = "AKS Custom Resources Writer (${var.project_name}-${var.environment})"
+  scope       = var.resource_group_id
+  description = "Lecture et écriture des ressources personnalisées Kubernetes pour la CI"
+
+  permissions {
+    actions     = []
+    not_actions = []
+    data_actions = [
+      "Microsoft.ContainerService/managedClusters/customresources/read",
+      "Microsoft.ContainerService/managedClusters/customresources/write",
+    ]
+    not_data_actions = []
+  }
+
+  assignable_scopes = [var.resource_group_id]
+}
+
+resource "azurerm_role_assignment" "aks_namespace_custom_resources_writer" {
+  scope                            = "${var.aks_cluster_id}/namespaces/${var.app_namespace}"
+  role_definition_id               = azurerm_role_definition.aks_custom_resources_writer.role_definition_resource_id
+  principal_id                     = azurerm_user_assigned_identity.github.principal_id
+  skip_service_principal_aad_check = true
+}

@@ -65,7 +65,8 @@ et découper ce module en sous-modules réutilisables (`network`, `aks`, `acr`).
 - `modules/ci` : identité managée fédérée avec GitHub (aucun secret Azure
   côté GitHub). Droits : `AcrPush` + `Reader` sur l'ACR, rôle custom limité à
   `az aks command invoke` sur le cluster, `AKS RBAC Writer` sur le namespace
-  `demo-app` uniquement.
+  `demo-app` uniquement, complété en Phase 4 par un rôle custom de
+  lecture/écriture des ressources personnalisées dans ce même namespace.
 - `.github/workflows/deploy.yml` : build + scan Trivy sans aucun accès Azure,
   puis job `deploy` (environnement GitHub `dev`) : push ACR → `kubectl apply`
   via `az aks command invoke`.
@@ -102,6 +103,32 @@ terraform output github_actions_variables
 Le secret n'est volontairement ni une variable Terraform ni un secret GitHub :
 sinon sa valeur serait stockée dans le state Terraform ou transiterait dans la
 CI. Seul son **nom** est versionné dans `key_vault_secret_name`.
+
+## Droits CI sur le SecretProviderClass
+
+Le rôle intégré `Azure Kubernetes Service RBAC Writer` ne couvre pas les
+ressources personnalisées comme `SecretProviderClass`. Le module
+[`ci`](modules/ci/main.tf) ajoute donc un rôle Azure custom avec uniquement :
+
+- `Microsoft.ContainerService/managedClusters/customresources/read` :
+  lecture de la configuration existante par `kubectl apply`.
+- `Microsoft.ContainerService/managedClusters/customresources/write` :
+  création et mise à jour de la ressource.
+
+L'assignation cible l'identité GitHub, au scope
+`<aks-cluster-id>/namespaces/demo-app`. Elle n'autorise ni la suppression des
+ressources personnalisées, ni la gestion des définitions CRD cluster-wide.
+Ces droits couvrent **toutes les ressources personnalisées de ce namespace**,
+pas seulement `SecretProviderClass` : le filtrage par groupe/type via Azure
+ABAC est encore en preview et n'est pas activé ici. Le rôle Writer existant
+reste nécessaire pour les ressources Kubernetes standard.
+
+En cas de `Forbidden` sur `secretproviderclasses`, applique les changements
+Terraform ci-dessous, laisse les nouvelles assignations se propager (jusqu'à
+cinq minutes), puis relance le workflow `deploy` via `workflow_dispatch`.
+Un push ne modifiant que Terraform ne déclenche pas ce workflow.
+La vérification doit être faite par le job utilisant l'identité CI : un
+`kubectl apply` réussi avec une identité admin ne valide pas ses droits.
 
 ## Déploiement
 
