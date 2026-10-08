@@ -12,4 +12,4 @@ resources:
 images:
   - name: demo-app
     newName: acraksdemodeva3b521.azurecr.io/demo-app
-    digest: sha256:4f2ef6f2dc0c20dfcc48a7e2221333ca0ffbcaa5b4f854d0e14334ffef1a6d96
+    digest: sha256:c5f033407e1a8ccda148946852aaa50e52a5b033956d1805f911e9e4e0c776a4
