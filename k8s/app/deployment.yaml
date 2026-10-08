@@ -14,12 +14,15 @@ spec:
     metadata:
       labels:
         app: demo-app
+        azure.workload.identity/use: "true"
     spec:
       automountServiceAccountToken: false
+      serviceAccountName: demo-app
       securityContext:
         runAsNonRoot: true
         runAsUser: 101
         runAsGroup: 101
+        fsGroup: 101
         supplementalGroups: [4000]
         seccompProfile:
           type: RuntimeDefault
@@ -38,6 +41,9 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: key-vault-secrets
+              mountPath: /mnt/secrets-store
+              readOnly: true
           resources:
             requests:
               cpu: 100m
@@ -58,6 +64,12 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: key-vault-secrets
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: demo-app-key-vault
 ---
 apiVersion: v1
 kind: Service

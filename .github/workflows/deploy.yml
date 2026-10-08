@@ -92,6 +92,19 @@ jobs:
         working-directory: k8s/app
         run: sed -i "s|IMAGE_PLACEHOLDER|${{ steps.push.outputs.image }}|" deployment.yaml
 
+      - name: Render Key Vault integration
+        working-directory: k8s/app
+        run: |
+          sed -i "s|KEY_VAULT_NAME_PLACEHOLDER|${KEY_VAULT_NAME}|g" key-vault.yaml
+          sed -i "s|KEY_VAULT_SECRET_NAME_PLACEHOLDER|${KEY_VAULT_SECRET_NAME}|g" key-vault.yaml
+          sed -i "s|TENANT_ID_PLACEHOLDER|${TENANT_ID}|g" key-vault.yaml
+          sed -i "s|WORKLOAD_IDENTITY_CLIENT_ID_PLACEHOLDER|${WORKLOAD_IDENTITY_CLIENT_ID}|g" key-vault.yaml
+        env:
+          KEY_VAULT_NAME: ${{ vars.KEY_VAULT_NAME }}
+          KEY_VAULT_SECRET_NAME: ${{ vars.KEY_VAULT_SECRET_NAME }}
+          TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          WORKLOAD_IDENTITY_CLIENT_ID: ${{ vars.WORKLOAD_IDENTITY_CLIENT_ID }}
+
       # Le runner hébergé n'a pas de route vers l'API server privé :
       # command invoke fait exécuter kubectl par un pod éphémère dans le
       # cluster, avec le token Entra de l'identité CI (RBAC Writer sur le

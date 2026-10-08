@@ -114,6 +114,12 @@ variable "policy_effect" {
   default     = "Audit"
 }
 
+variable "key_vault_secret_name" {
+  description = "Nom du secret créé manuellement dans Key Vault et monté par demo-app via CSI"
+  type        = string
+  default     = "demo-app-api-key"
+}
+
 variable "tags" {
   description = "Tags communs appliqués à toutes les ressources"
   type        = map(string)

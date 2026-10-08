@@ -90,3 +90,21 @@ module "policy" {
   app_namespaces   = [var.app_namespace]
   effect           = var.policy_effect
 }
+
+module "key_vault" {
+  source = "./modules/key-vault"
+
+  resource_group_name = azurerm_resource_group.main.name
+  location            = azurerm_resource_group.main.location
+  project_name        = var.project_name
+  environment         = var.environment
+
+  vnet_id                     = module.network.vnet_id
+  private_endpoints_subnet_id = module.network.private_endpoints_subnet_id
+  aks_oidc_issuer_url         = module.aks.oidc_issuer_url
+  tenant_id                   = data.azurerm_client_config.current.tenant_id
+  app_namespace               = var.app_namespace
+  secret_name                 = var.key_vault_secret_name
+
+  tags = var.tags
+}

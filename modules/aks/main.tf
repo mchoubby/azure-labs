@@ -38,6 +38,13 @@ resource "azurerm_kubernetes_cluster" "main" {
   # les assignments Azure Policy scopés sur ce cluster (modules/policy).
   azure_policy_enabled = true
 
+  # Installe Secrets Store CSI Driver et le provider Azure. Les workloads
+  # s'authentifient ensuite avec Workload Identity, pas avec cette identité
+  # managée créée par l'add-on.
+  key_vault_secrets_provider {
+    secret_rotation_enabled = true
+  }
+
   identity {
     type         = "UserAssigned"
     identity_ids = [azurerm_user_assigned_identity.aks_control_plane.id]

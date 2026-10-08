@@ -6,6 +6,10 @@ admin_object_ids = ["<ton-object-id-azure-ad>"]
 
 github_repository = "<nom-du-repo>"
 
+# Nom du secret à créer hors Terraform dans le Key Vault privé. La valeur ne
+# doit jamais être ajoutée à terraform.tfvars ni à GitHub Actions.
+key_vault_secret_name = "demo-app-api-key"
+
 # Si GitHub émet le subject OIDC au format immutable (repo:owner@<id>/repo@<id>:...,
 # visible dans le log "subject claim" de azure/login), renseigner les IDs :
 # github_repository_ids = { owner_id = <owner-id>, repository_id = <repo-id> }
