@@ -21,7 +21,7 @@ appli fintech-like. Plan en 6 phases :
 2. **Backend state distant + modularisation Terraform** — ✅ fait
 3. **CI/CD GitHub Actions avec OIDC** — ✅ fait (appliqué, pipeline vert de bout en bout)
 4. **DevSecOps** (Gatekeeper/OPA, Network Policies, Key Vault CSI) — ✅ fait (appliqué, pods 2/2, secret CSI monté)
-5. **GitOps** (Flux via extension AKS managée) — code prêt, bascule en cours
+5. **GitOps** (Flux via extension AKS managée) — ✅ fait (Flux Compliant, déploiement par digest, CI sans droit Kubernetes)
 6. **Observabilité et résilience** (Prometheus/Grafana, HPA, chaos test) — à faire
 
 ## Architecture actuelle (Phases 1-5)
@@ -119,11 +119,10 @@ k8s/app/                       # Kustomization Flux "app" : SA, SecretProviderCl
 Le cluster Phase 1-3 a été réellement déployé et migré (pas juste du code
 jamais appliqué) : `terraform apply` fait à chaque phase, state migré vers
 modules via `terraform state mv` (`scripts/migrate-state-to-modules.sh`).
-Phases 3 et 4 appliquées : `demo-app` 2/2 pods, image tirée via le Private
+Phases 3 à 5 appliquées (Flux réconcilie k8s/platform et k8s/app depuis main) : `demo-app` 2/2 pods, image tirée via le Private
 Endpoint, secret Key Vault monté via CSI + Workload Identity. Azure Policy
 pilotée par `policy_effect` (`Audit` par défaut).
 
 ## Prochaine étape
-Phase 5 — finaliser la bascule Flux (apply, variable GitHub
-`FLUX_CONFIGURATION_NAME`, push, deploy key — voir README), puis Phase 6 —
-observabilité et résilience.
+Phase 6 — observabilité et résilience (Prometheus/Grafana, HPA, PDB +
+anti-affinité — les 2 pods demo-app sont sur le même node —, chaos test).
