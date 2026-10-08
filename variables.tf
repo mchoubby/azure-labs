@@ -103,7 +103,7 @@ variable "github_repository_ids" {
 }
 
 variable "app_namespace" {
-  description = "Namespace Kubernetes de l'application, seul namespace où la CI peut écrire"
+  description = "Namespace Kubernetes de l'application (policies restricted, fédération Workload Identity)"
   type        = string
   default     = "demo-app"
 }

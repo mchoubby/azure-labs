@@ -1,0 +1,15 @@
+# Réconcilié par la Kustomization Flux "app" (modules/gitops), après
+# "platform". Les variables ${...} sont substituées par Flux (postBuild) à
+# partir des valeurs fournies par Terraform.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - key-vault.yaml
+  - deployment.yaml
+  - network-policy.yaml
+# Mis à jour par la CI (kustomize edit set image) à chaque build : référence
+# par digest, immuable, contrairement à un tag.
+images:
+  - name: demo-app
+    newName: acraksdemodeva3b521.azurecr.io/demo-app
+    digest: sha256:4f2ef6f2dc0c20dfcc48a7e2221333ca0ffbcaa5b4f854d0e14334ffef1a6d96

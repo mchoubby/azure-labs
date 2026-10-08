@@ -77,7 +77,6 @@ module "ci" {
 
   acr_id         = module.acr.acr_id
   aks_cluster_id = module.aks.cluster_id
-  app_namespace  = var.app_namespace
 
   tags = var.tags
 }
@@ -107,4 +106,18 @@ module "key_vault" {
   secret_name                 = var.key_vault_secret_name
 
   tags = var.tags
+}
+
+module "gitops" {
+  source = "./modules/gitops"
+
+  aks_cluster_id    = module.aks.cluster_id
+  github_repository = var.github_repository
+
+  app_substitutions = {
+    KEY_VAULT_NAME              = module.key_vault.key_vault_name
+    KEY_VAULT_SECRET_NAME       = module.key_vault.secret_name
+    TENANT_ID                   = data.azurerm_client_config.current.tenant_id
+    WORKLOAD_IDENTITY_CLIENT_ID = module.key_vault.workload_identity_client_id
+  }
 }

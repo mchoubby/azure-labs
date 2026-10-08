@@ -3,20 +3,21 @@ name: deploy
 on:
   push:
     branches: [main]
+    # Seul un changement d'image justifie un build. Les manifestes k8s/ sont
+    # réconciliés par Flux directement depuis Git, sans passer par la CI.
     paths:
       - "app/**"
-      # k8s/platform/ est appliqué par un admin, pas par ce pipeline
-      - "k8s/app/**"
       - ".github/workflows/deploy.yml"
   workflow_dispatch:
 
-# Un seul déploiement à la fois par environnement : un second push attend
-# la fin du premier au lieu de lancer deux kubectl apply concurrents.
+# Un seul déploiement à la fois par environnement : un second run attend la
+# fin du premier au lieu de produire deux commits d'image concurrents.
 concurrency:
   group: deploy-dev
   cancel-in-progress: false
 
-# Permissions minimales par défaut ; id-token n'est accordé qu'au job deploy.
+# Permissions minimales par défaut ; id-token et contents: write ne sont
+# accordés qu'au job deploy.
 permissions:
   contents: read
 
@@ -54,17 +55,27 @@ jobs:
           path: image.tar
           retention-days: 1
 
+  # CI uniquement : publie l'image puis déclare la version voulue dans Git.
+  # Le déploiement lui-même est fait par Flux (modèle pull) : cette identité
+  # n'a aucun droit Kubernetes, seulement la lecture de l'état Flux via ARM.
   deploy:
     needs: build
+    # Flux suit main : publier un digest depuis une autre branche n'aurait
+    # aucun effet (ou écraserait main).
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     # Le subject OIDC fédéré côté Azure est repo:<owner>/<repo>:environment:dev.
     # Un job sans cet environnement ne peut pas obtenir de token Azure.
     environment: dev
     permissions:
-      contents: read
+      # Commit du nouveau digest dans k8s/app/kustomization.yaml. Un push
+      # fait avec GITHUB_TOKEN ne déclenche aucun workflow : pas de boucle.
+      contents: write
       id-token: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
 
       - uses: actions/download-artifact@v4
         with:
@@ -77,51 +88,76 @@ jobs:
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
+      # Le digest (sha256 du manifeste) est la seule référence immuable : un
+      # tag peut être repoussé, le digest garantit que Flux déploie
+      # exactement l'image scannée par Trivy dans le job build.
       - name: Push ACR
         id: push
         run: |
           az acr login --name "${{ vars.ACR_NAME }}"
           LOGIN_SERVER=$(az acr show --name "${{ vars.ACR_NAME }}" --query loginServer -o tsv)
-          IMAGE="${LOGIN_SERVER}/${IMAGE_NAME}:${GITHUB_SHA}"
+          IMAGE="${LOGIN_SERVER}/${IMAGE_NAME}"
           docker load -i image.tar
-          docker tag "${IMAGE_NAME}:${GITHUB_SHA}" "${IMAGE}"
-          docker push "${IMAGE}"
+          docker tag "${IMAGE_NAME}:${GITHUB_SHA}" "${IMAGE}:${GITHUB_SHA}"
+          docker push "${IMAGE}:${GITHUB_SHA}"
+          DIGEST=$(docker inspect --format '{{index .RepoDigests 0}}' "${IMAGE}:${GITHUB_SHA}" | cut -d@ -f2)
+          test -n "${DIGEST}"
           echo "image=${IMAGE}" >> "${GITHUB_OUTPUT}"
+          echo "digest=${DIGEST}" >> "${GITHUB_OUTPUT}"
 
-      - name: Render manifest
-        working-directory: k8s/app
-        run: sed -i "s|IMAGE_PLACEHOLDER|${{ steps.push.outputs.image }}|" deployment.yaml
-
-      - name: Render Key Vault integration
-        working-directory: k8s/app
-        run: |
-          sed -i "s|KEY_VAULT_NAME_PLACEHOLDER|${KEY_VAULT_NAME}|g" key-vault.yaml
-          sed -i "s|KEY_VAULT_SECRET_NAME_PLACEHOLDER|${KEY_VAULT_SECRET_NAME}|g" key-vault.yaml
-          sed -i "s|TENANT_ID_PLACEHOLDER|${TENANT_ID}|g" key-vault.yaml
-          sed -i "s|WORKLOAD_IDENTITY_CLIENT_ID_PLACEHOLDER|${WORKLOAD_IDENTITY_CLIENT_ID}|g" key-vault.yaml
+      # yq plutôt que `kustomize edit set image` : préserve les commentaires
+      # du fichier. Retry avec rebase si main a bougé pendant le run.
+      - name: Commit image digest (GitOps)
+        id: commit
         env:
-          KEY_VAULT_NAME: ${{ vars.KEY_VAULT_NAME }}
-          KEY_VAULT_SECRET_NAME: ${{ vars.KEY_VAULT_SECRET_NAME }}
-          TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
-          WORKLOAD_IDENTITY_CLIENT_ID: ${{ vars.WORKLOAD_IDENTITY_CLIENT_ID }}
-
-      # Le runner hébergé n'a pas de route vers l'API server privé :
-      # command invoke fait exécuter kubectl par un pod éphémère dans le
-      # cluster, avec le token Entra de l'identité CI (RBAC Writer et rôle
-      # custom lecture/écriture des ressources personnalisées, limités au namespace).
-      #
-      # command invoke renvoie 0 même si la commande distante échoue : le
-      # vrai code de retour est dans .exitCode du JSON.
-      - name: Deploy (az aks command invoke)
-        working-directory: k8s/app
+          IMAGE: ${{ steps.push.outputs.image }}
+          DIGEST: ${{ steps.push.outputs.digest }}
         run: |
-          RESULT=$(az aks command invoke \
-            --resource-group "${{ vars.AKS_RESOURCE_GROUP }}" \
-            --name "${{ vars.AKS_CLUSTER_NAME }}" \
-            --file . \
-            --command "kubectl apply -f . && kubectl rollout status deployment/demo-app -n ${{ vars.APP_NAMESPACE }} --timeout=180s" \
-            -o json)
-          echo "${RESULT}" | jq -r '.logs'
-          EXIT_CODE=$(echo "${RESULT}" | jq -r '.exitCode')
-          echo "Remote exit code: ${EXIT_CODE}"
-          test "${EXIT_CODE}" = "0"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          update() {
+            yq -i '(.images[] | select(.name == "demo-app")) |= (.newName = strenv(IMAGE) | .digest = strenv(DIGEST))' \
+              k8s/app/kustomization.yaml
+          }
+
+          update
+          if git diff --quiet; then
+            echo "Digest déjà déclaré dans Git, rien à commiter."
+          else
+            git add k8s/app/kustomization.yaml
+            git commit -m "deploy(demo-app): ${DIGEST} (${GITHUB_SHA::7})"
+            for attempt in 1 2 3; do
+              if git push origin HEAD:main; then break; fi
+              test "${attempt}" -lt 3
+              git pull --rebase origin main
+            done
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "${GITHUB_OUTPUT}"
+
+      # Retour de déploiement sans accès au cluster : l'extension Flux
+      # remonte dans ARM le commit synchronisé et l'état de conformité.
+      # La Kustomization "app" a wait=true, donc Compliant implique que le
+      # rollout est terminé et les pods Ready.
+      - name: Wait for Flux reconciliation
+        env:
+          EXPECTED_SHA: ${{ steps.commit.outputs.sha }}
+        run: |
+          az extension add --name k8s-configuration --upgrade --only-show-errors
+          for i in $(seq 1 60); do
+            CONFIG=$(az k8s-configuration flux show \
+              --resource-group "${{ vars.AKS_RESOURCE_GROUP }}" \
+              --cluster-name "${{ vars.AKS_CLUSTER_NAME }}" \
+              --cluster-type managedClusters \
+              --name "${{ vars.FLUX_CONFIGURATION_NAME }}" -o json)
+            SYNCED=$(echo "${CONFIG}" | jq -r '.sourceSyncedCommitId // ""')
+            STATE=$(echo "${CONFIG}" | jq -r '.complianceState // ""')
+            echo "[${i}] commit=${SYNCED} state=${STATE}"
+            if [[ "${SYNCED}" == *"${EXPECTED_SHA}"* && "${STATE}" == "Compliant" ]]; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Flux n'a pas convergé sur ${EXPECTED_SHA} :"
+          echo "${CONFIG}" | jq '.statuses'
+          exit 1

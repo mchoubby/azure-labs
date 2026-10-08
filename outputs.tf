@@ -42,20 +42,24 @@ output "key_vault_uri" {
   value = module.key_vault.key_vault_uri
 }
 
+output "flux_deploy_key_public" {
+  description = "À enregistrer en deploy key lecture seule : gh repo deploy-key add --read-only"
+  value       = module.gitops.deploy_key_public
+}
+
 # Valeurs à reporter dans Settings → Environments → <environment> → Variables
 # du dépôt GitHub. Aucune n'est un secret : sans la fédération OIDC côté
-# Entra ID, connaître ces IDs ne permet pas d'obtenir un token.
+# Entra ID, connaître ces IDs ne permet pas d'obtenir un token. Les valeurs
+# consommées par les manifestes (Key Vault, Workload Identity) sont injectées
+# par Flux et n'ont plus à transiter par la CI.
 output "github_actions_variables" {
   value = {
-    AZURE_CLIENT_ID             = module.ci.client_id
-    AZURE_TENANT_ID             = data.azurerm_client_config.current.tenant_id
-    AZURE_SUBSCRIPTION_ID       = data.azurerm_client_config.current.subscription_id
-    ACR_NAME                    = module.acr.acr_name
-    AKS_RESOURCE_GROUP          = azurerm_resource_group.main.name
-    AKS_CLUSTER_NAME            = module.aks.cluster_name
-    APP_NAMESPACE               = var.app_namespace
-    KEY_VAULT_NAME              = module.key_vault.key_vault_name
-    KEY_VAULT_SECRET_NAME       = module.key_vault.secret_name
-    WORKLOAD_IDENTITY_CLIENT_ID = module.key_vault.workload_identity_client_id
+    AZURE_CLIENT_ID         = module.ci.client_id
+    AZURE_TENANT_ID         = data.azurerm_client_config.current.tenant_id
+    AZURE_SUBSCRIPTION_ID   = data.azurerm_client_config.current.subscription_id
+    ACR_NAME                = module.acr.acr_name
+    AKS_RESOURCE_GROUP      = azurerm_resource_group.main.name
+    AKS_CLUSTER_NAME        = module.aks.cluster_name
+    FLUX_CONFIGURATION_NAME = module.gitops.flux_configuration_name
   }
 }

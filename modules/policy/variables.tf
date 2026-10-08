@@ -23,6 +23,7 @@ variable "system_namespaces" {
     "calico-system",
     "tigera-operator",
     "aks-command",
+    "flux-system",
   ]
 }
 

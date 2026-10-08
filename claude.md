@@ -20,23 +20,28 @@ appli fintech-like. Plan en 6 phases :
 1. **Fondations réseau + cluster** — ✅ fait
 2. **Backend state distant + modularisation Terraform** — ✅ fait
 3. **CI/CD GitHub Actions avec OIDC** — ✅ fait (appliqué, pipeline vert de bout en bout)
-4. **DevSecOps** (Gatekeeper/OPA, Network Policies, Key Vault CSI) — à faire
-5. **GitOps** (Flux/ArgoCD) — à faire
+4. **DevSecOps** (Gatekeeper/OPA, Network Policies, Key Vault CSI) — ✅ fait (appliqué, pods 2/2, secret CSI monté)
+5. **GitOps** (Flux via extension AKS managée) — code prêt, bascule en cours
 6. **Observabilité et résilience** (Prometheus/Grafana, HPA, chaos test) — à faire
 
-## Architecture actuelle (Phases 1-3)
+## Architecture actuelle (Phases 1-5)
 
 ```
-*.tf (racine)       # root module — assemble les 4 modules (pas encore de découpage envs/)
+*.tf (racine)       # root module — assemble les modules (pas encore de découpage envs/)
 modules/network/    # VNet + 3 subnets (aks-nodes, private-endpoints, appgw) + NSG
-modules/aks/        # cluster privé, CNI Overlay, Workload Identity, node pools system+user
+modules/aks/        # cluster privé, CNI Overlay, Workload Identity, node pools system+user,
+                    # add-ons Azure Policy et Key Vault Secrets Provider (CSI)
 modules/acr/        # ACR Premium + Private Endpoint + zone privatelink.azurecr.io, AcrPull kubelet
 modules/ci/         # UAMI fédérée OIDC (subject = environment GitHub), AcrPush+Reader ACR,
-                    # rôle custom "command invoke" sur le cluster, RBAC Writer sur le namespace
-.github/workflows/deploy.yml   # build → scan Trivy (sans accès Azure) → [env dev] push ACR → command invoke
+                    # rôle custom lecture cluster + fluxConfigurations/read. AUCUN droit Kubernetes.
+modules/policy/     # Azure Policy (Gatekeeper) : PSS baseline cluster, restricted + images ACR sur l'app
+modules/key-vault/  # Key Vault RBAC privé (PE), UAMI applicative fédérée au SA demo-app
+modules/gitops/     # extension microsoft.flux + flux configuration "gitops" + deploy key SSH (tls)
+.github/workflows/deploy.yml   # build → Trivy (sans accès Azure) → [env dev] push ACR →
+                               # commit du digest dans k8s/app/kustomization.yaml → attente Flux Compliant (ARM)
 app/                           # appli de démo (nginx-unprivileged, /healthz sur 8080)
-k8s/namespace.yaml             # appliqué une fois par un admin, pas par la CI
-k8s/deployment.yaml            # manifeste d'exemple, à remplacer par la vraie appli
+k8s/platform/                  # Kustomization Flux "platform" : namespace + NetworkPolicies baseline
+k8s/app/                       # Kustomization Flux "app" : SA, SecretProviderClass, Deployment, Service, netpol
 ```
 
 ## Décisions techniques clés (à ne pas re-proposer de changer sans discussion)
@@ -84,6 +89,12 @@ k8s/deployment.yaml            # manifeste d'exemple, à remplacer par la vraie 
    `modules/policy/variables.tf` (`system_namespaces`).
 8. **Cluster stoppé = aucun update possible** sur la ressource AKS (et donc
    rien de ce qui en dépend dans le graphe Terraform).
+9. **`AKS RBAC Writer` ne couvre pas les CRD** (`SecretProviderClass`…) :
+   il faut les DataActions `managedClusters/customresources/*` (rôle custom).
+   Symptôme : `Forbidden ... cannot get resource "secretproviderclasses"`.
+10. **Ordre de bascule GitOps** : ne jamais donner à Flux l'accès au repo
+    (deploy key) avant que `k8s/*/kustomization.yaml` soit sur main — sans
+    kustomization.yaml, Flux applique tous les YAML du dossier tels quels.
 
 ## Compromis assumés, à challenger si possible
 - ~~Contributor sur le cluster pour la CI~~ → remplacé par un rôle custom
@@ -95,16 +106,24 @@ k8s/deployment.yaml            # manifeste d'exemple, à remplacer par la vraie 
   Endpoint. Les nodes tirent via le PE. À fermer
   (`acr_public_network_access_enabled = false`) dès qu'un runner self-hosted
   dans le VNet existe.
-- Le pipeline fait le `kubectl apply` lui-même (CI et CD mélangés) — sera
-  corrigé en Phase 5 avec un vrai GitOps (Flux/ArgoCD).
+- ~~Le pipeline fait le `kubectl apply` lui-même~~ → Flux (Phase 5). La CI
+  garde `contents: write` (job deploy uniquement) pour commiter le digest.
+- **Deploy key Flux générée par Terraform** : clé privée dans le state
+  (backend azurerm, auth Entra). Alternative : `local_auth_reference`.
+- **Flux cluster-admin** (RBAC Kubernetes du SA kustomize-controller) —
+  durcissement possible par impersonation d'un ServiceAccount de namespace.
+- **Les deux pods demo-app sur le même node** : pas d'anti-affinité ni de
+  PDB — à traiter en Phase 6.
 
 ## État du déploiement réel
 Le cluster Phase 1-3 a été réellement déployé et migré (pas juste du code
 jamais appliqué) : `terraform apply` fait à chaque phase, state migré vers
 modules via `terraform state mv` (`scripts/migrate-state-to-modules.sh`).
-Phase 3 appliquée, `demo-app` déployé par la CI (2/2 pods, image tirée via le Private Endpoint).
+Phases 3 et 4 appliquées : `demo-app` 2/2 pods, image tirée via le Private
+Endpoint, secret Key Vault monté via CSI + Workload Identity. Azure Policy
+pilotée par `policy_effect` (`Audit` par défaut).
 
-## Prochaine étape demandée par l'utilisateur
-Phase 4 — DevSecOps : Azure Policy/Gatekeeper (OPA), Network Policies (Calico,
-déjà activé au niveau cluster mais pas encore de policies définies), Key Vault
-CSI driver pour les secrets.
+## Prochaine étape
+Phase 5 — finaliser la bascule Flux (apply, variable GitHub
+`FLUX_CONFIGURATION_NAME`, push, deploy key — voir README), puis Phase 6 —
+observabilité et résilience.

@@ -4,7 +4,7 @@ metadata:
   name: demo-app
   namespace: demo-app
   annotations:
-    azure.workload.identity/client-id: WORKLOAD_IDENTITY_CLIENT_ID_PLACEHOLDER
+    azure.workload.identity/client-id: ${WORKLOAD_IDENTITY_CLIENT_ID}
 ---
 apiVersion: secrets-store.csi.x-k8s.io/v1
 kind: SecretProviderClass
@@ -14,14 +14,14 @@ metadata:
 spec:
   provider: azure
   parameters:
-    clientID: WORKLOAD_IDENTITY_CLIENT_ID_PLACEHOLDER
-    keyvaultName: KEY_VAULT_NAME_PLACEHOLDER
-    tenantId: TENANT_ID_PLACEHOLDER
+    clientID: ${WORKLOAD_IDENTITY_CLIENT_ID}
+    keyvaultName: ${KEY_VAULT_NAME}
+    tenantId: ${TENANT_ID}
     usePodIdentity: "false"
     useVMManagedIdentity: "false"
     objects: |
       array:
         - |
-          objectName: KEY_VAULT_SECRET_NAME_PLACEHOLDER
+          objectName: ${KEY_VAULT_SECRET_NAME}
           objectType: secret
           objectAlias: api-key

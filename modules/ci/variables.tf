@@ -51,11 +51,6 @@ variable "aks_cluster_id" {
   type = string
 }
 
-variable "app_namespace" {
-  description = "Namespace Kubernetes dans lequel la CI a les droits d'écriture"
-  type        = string
-}
-
 variable "tags" {
   type    = map(string)
   default = {}

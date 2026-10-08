@@ -1,6 +1,7 @@
-# Baseline réseau du namespace demo-app — appliquée par un admin, comme le
-# namespace. Tout est interdit par défaut, puis chaque application ouvre
-# explicitement ses flux entrants (voir k8s/app/network-policy.yaml).
+# Baseline réseau du namespace demo-app — réconciliée par Flux avec le
+# namespace (Kustomization "platform"). Tout est interdit par défaut, puis
+# chaque application ouvre explicitement ses flux entrants
+# (voir k8s/app/network-policy.yaml).
 #
 # Les NetworkPolicies sont additives (union des règles) : une policy
 # applicative ne peut qu'ouvrir, jamais annuler ce deny-all.

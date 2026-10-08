@@ -58,19 +58,19 @@ resource "azurerm_role_assignment" "acr_reader" {
 
 # --- Cluster : control plane (ARM) ------------------------------------------
 
-# Remplace le Contributor sur le cluster : ce rôle ne permet que de lancer
-# `az aks command invoke` et d'en lire le résultat. Il ne permet ni de
-# modifier le cluster, ni de récupérer un kubeconfig (listClusterUserCredential).
-resource "azurerm_role_definition" "aks_command_invoke" {
-  name        = "AKS Command Invoke (${var.project_name}-${var.environment})"
+# Depuis la Phase 5, Flux déploie (modèle pull) : la CI n'a plus aucun droit
+# Kubernetes (ni command invoke, ni rôle data plane). Elle lit seulement
+# l'état de conformité de la configuration Flux via ARM pour savoir si son
+# commit a été appliqué.
+resource "azurerm_role_definition" "aks_deploy_status_reader" {
+  name        = "AKS GitOps Status Reader (${var.project_name}-${var.environment})"
   scope       = var.resource_group_id
-  description = "Exécution de az aks command invoke uniquement"
+  description = "Lecture du cluster et de l'état des configurations Flux, sans accès Kubernetes"
 
   permissions {
     actions = [
       "Microsoft.ContainerService/managedClusters/read",
-      "Microsoft.ContainerService/managedClusters/runcommand/action",
-      "Microsoft.ContainerService/managedClusters/commandResults/read",
+      "Microsoft.KubernetesConfiguration/fluxConfigurations/read",
     ]
     not_actions = []
   }
@@ -78,50 +78,21 @@ resource "azurerm_role_definition" "aks_command_invoke" {
   assignable_scopes = [var.resource_group_id]
 }
 
-resource "azurerm_role_assignment" "aks_command_invoke" {
+resource "azurerm_role_assignment" "aks_deploy_status_reader" {
   scope                            = var.aks_cluster_id
-  role_definition_id               = azurerm_role_definition.aks_command_invoke.role_definition_resource_id
+  role_definition_id               = azurerm_role_definition.aks_deploy_status_reader.role_definition_resource_id
   principal_id                     = azurerm_user_assigned_identity.github.principal_id
   skip_service_principal_aad_check = true
 }
 
-# --- Cluster : data plane (Kubernetes) --------------------------------------
-
-# Sur un cluster azure_rbac_enabled, command invoke exécute kubectl avec le
-# token Entra de l'appelant : sans rôle data plane, le kubectl apply est
-# refusé (403) même si le runcommand lui-même passe. Scope limité au
-# namespace applicatif — la CI ne peut rien toucher d'autre dans le cluster.
-resource "azurerm_role_assignment" "aks_namespace_writer" {
-  scope                            = "${var.aks_cluster_id}/namespaces/${var.app_namespace}"
-  role_definition_name             = "Azure Kubernetes Service RBAC Writer"
-  principal_id                     = azurerm_user_assigned_identity.github.principal_id
-  skip_service_principal_aad_check = true
+# Mise à jour en place de l'ancien rôle "command invoke" plutôt qu'un
+# destroy/create (même identifiant Azure, permissions réduites).
+moved {
+  from = azurerm_role_definition.aks_command_invoke
+  to   = azurerm_role_definition.aks_deploy_status_reader
 }
 
-# RBAC Writer ne couvre pas les ressources personnalisées (SecretProviderClass).
-# Sans ABAC, ces DataActions couvrent toutes les ressources personnalisées du
-# namespace ; aucune permission de suppression ni de gestion des CRD.
-resource "azurerm_role_definition" "aks_custom_resources_writer" {
-  name        = "AKS Custom Resources Writer (${var.project_name}-${var.environment})"
-  scope       = var.resource_group_id
-  description = "Lecture et écriture des ressources personnalisées Kubernetes pour la CI"
-
-  permissions {
-    actions     = []
-    not_actions = []
-    data_actions = [
-      "Microsoft.ContainerService/managedClusters/customresources/read",
-      "Microsoft.ContainerService/managedClusters/customresources/write",
-    ]
-    not_data_actions = []
-  }
-
-  assignable_scopes = [var.resource_group_id]
-}
-
-resource "azurerm_role_assignment" "aks_namespace_custom_resources_writer" {
-  scope                            = "${var.aks_cluster_id}/namespaces/${var.app_namespace}"
-  role_definition_id               = azurerm_role_definition.aks_custom_resources_writer.role_definition_resource_id
-  principal_id                     = azurerm_user_assigned_identity.github.principal_id
-  skip_service_principal_aad_check = true
+moved {
+  from = azurerm_role_assignment.aks_command_invoke
+  to   = azurerm_role_assignment.aks_deploy_status_reader
 }

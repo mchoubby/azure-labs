@@ -1,4 +1,4 @@
-# Flux entrants autorisés vers demo-app. Déployé par la CI avec l'appli :
+# Flux entrants autorisés vers demo-app. Réconcilié par Flux avec l'appli :
 # c'est l'application qui déclare qui peut l'appeler.
 # Pas encore d'ingress controller : seuls les pods du namespace y accèdent.
 apiVersion: networking.k8s.io/v1
