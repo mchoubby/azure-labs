@@ -6,8 +6,6 @@ metadata:
   labels:
     app: demo-app
 spec:
-  # Temporaire (commit 1 Phase 6) : retiré au commit 2, le HPA gère ensuite ce champ
-  replicas: 2
   strategy:
     type: RollingUpdate
     rollingUpdate:
