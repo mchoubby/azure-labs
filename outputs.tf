@@ -42,6 +42,18 @@ output "key_vault_uri" {
   value = module.key_vault.key_vault_uri
 }
 
+output "grafana_endpoint" {
+  value = module.monitoring.grafana_endpoint
+}
+
+output "prometheus_query_endpoint" {
+  value = module.monitoring.prometheus_query_endpoint
+}
+
+output "monitor_workspace_id" {
+  value = module.monitoring.monitor_workspace_id
+}
+
 output "flux_deploy_key_public" {
   description = "À enregistrer en deploy key lecture seule : gh repo deploy-key add --read-only"
   value       = module.gitops.deploy_key_public

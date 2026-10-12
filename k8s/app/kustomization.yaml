@@ -7,6 +7,8 @@ resources:
   - key-vault.yaml
   - deployment.yaml
   - network-policy.yaml
+  - hpa.yaml
+  - pdb.yaml
 # Mis à jour par la CI (kustomize edit set image) à chaque build : référence
 # par digest, immuable, contrairement à un tag.
 images:

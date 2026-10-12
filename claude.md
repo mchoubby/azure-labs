@@ -22,7 +22,7 @@ appli fintech-like. Plan en 6 phases :
 3. **CI/CD GitHub Actions avec OIDC** — ✅ fait (appliqué, pipeline vert de bout en bout)
 4. **DevSecOps** (Gatekeeper/OPA, Network Policies, Key Vault CSI) — ✅ fait (appliqué, pods 2/2, secret CSI monté)
 5. **GitOps** (Flux via extension AKS managée) — ✅ fait (Flux Compliant, déploiement par digest, CI sans droit Kubernetes)
-6. **Observabilité et résilience** (Prometheus/Grafana, HPA, chaos test) — à faire
+6. **Observabilité et résilience** — en cours (Managed Prometheus/Grafana, HPA, PDB, topology spread, tests manuels ; pas encore appliqué)
 
 ## Architecture actuelle (Phases 1-5)
 
@@ -37,6 +37,7 @@ modules/ci/         # UAMI fédérée OIDC (subject = environment GitHub), AcrPu
 modules/policy/     # Azure Policy (Gatekeeper) : PSS baseline cluster, restricted + images ACR sur l'app
 modules/key-vault/  # Key Vault RBAC privé (PE), UAMI applicative fédérée au SA demo-app
 modules/gitops/     # extension microsoft.flux + flux configuration "gitops" + deploy key SSH (tls)
+modules/monitoring/ # Azure Monitor workspace, DCE/DCR, Managed Grafana et RBAC Entra (Phase 6)
 .github/workflows/deploy.yml   # build → Trivy (sans accès Azure) → [env dev] push ACR →
                                # commit du digest dans k8s/app/kustomization.yaml → attente Flux Compliant (ARM)
 app/                           # appli de démo (nginx-unprivileged, /healthz sur 8080)
@@ -95,6 +96,11 @@ k8s/app/                       # Kustomization Flux "app" : SA, SecretProviderCl
 10. **Ordre de bascule GitOps** : ne jamais donner à Flux l'accès au repo
     (deploy key) avant que `k8s/*/kustomization.yaml` soit sur main — sans
     kustomization.yaml, Flux applique tous les YAML du dossier tels quels.
+11. **Quota vCPU = régional ET par famille de VM** (surge et max autoscaler
+    compris). `cores` est passé à 24 en libre-service, mais
+    `standardDDSv6Family` (francecentral) reste à 10 : `az quota update`
+    renvoie `QuotaNotAvailableForResource`. D'où un seul node user.
+    Vérifier avec `az vm list-usage -l francecentral` avant tout scale-out.
 
 ## Compromis assumés, à challenger si possible
 - ~~Contributor sur le cluster pour la CI~~ → remplacé par un rôle custom
@@ -114,6 +120,16 @@ k8s/app/                       # Kustomization Flux "app" : SA, SecretProviderCl
   durcissement possible par impersonation d'un ServiceAccount de namespace.
 - **Les deux pods demo-app sur le même node** : pas d'anti-affinité ni de
   PDB — à traiter en Phase 6.
+- **Phase 6 retenue** : **un seul node user** en pratique (min 1 / max 5,
+  quota DDSv6 bloqué : tout scale-out échoue), topology
+  spread par hostname en `ScheduleAnyway` (préférence, effective seulement
+  avec plusieurs nodes), HPA CPU 2-5 cible 60 %, PDB minAvailable=1. Aucune
+  résilience à la perte du node user ; drain et mise à jour du pool user
+  impossibles sans quota supplémentaire. Retrait de replicas dans Git après
+  mise en place du HPA.
+- **Observabilité managée** : endpoints publics Entra pour Prometheus et
+  Grafana, aucune clé API ; AKS reste privé. Grafana Standard reste facturé
+  pendant un arrêt AKS. Tests manuels bornés, pas de Chaos Studio/Chaos Mesh.
 
 ## État du déploiement réel
 Le cluster Phase 1-3 a été réellement déployé et migré (pas juste du code
@@ -124,5 +140,8 @@ Endpoint, secret Key Vault monté via CSI + Workload Identity. Azure Policy
 pilotée par `policy_effect` (`Audit` par défaut).
 
 ## Prochaine étape
-Phase 6 — observabilité et résilience (Prometheus/Grafana, HPA, PDB +
-anti-affinité — les 2 pods demo-app sont sur le même node —, chaos test).
+Phase 6 — observabilité Terraform appliquée (workspace, DCR, Grafana,
+`monitor_metrics`) ; pool user min 1 / max 5 (un seul node en pratique, quota). Basculer les
+manifestes GitOps en deux commits (HPA avec replicas=2, puis retrait de
+replicas). Valider métriques/Grafana, test de charge et suppression de pod ;
+drain reporté (un seul node user). Ne marquer terminé qu'après vérification réelle.

@@ -241,3 +241,183 @@ gh repo deploy-key add flux.pub --repo <owner>/<repo> --title "flux-aks-dev" && 
   impersonation d'un ServiceAccount limité au namespace.
 - **La CI garde un droit d'écriture sur le dépôt** (`contents: write` limité
   au job `deploy`), nécessaire pour déclarer le digest.
+
+---
+
+# Phase 6 — Observabilité et résilience
+
+## Architecture
+
+`modules/monitoring` provisionne **Azure Monitor workspace** (Managed
+Prometheus), le Data Collection Endpoint, la Data Collection Rule et son
+association au cluster, ainsi que **Azure Managed Grafana Standard X1**.
+L'activation `monitor_metrics` dans `modules/aks` installe les agents
+`ama-metrics`. La collecte suit le
+[template Terraform officiel Azure](https://github.com/Azure/prometheus-collector/tree/main/AddonTerraformTemplate).
+Cluster, workspace et DCE restent dans `francecentral` : aucune association
+DCE supplémentaire pour un décalage de régions.
+
+Le workspace Prometheus est distinct du **Log Analytics existant**, qui
+conserve les logs Container Insights. Pas de duplication de Log Analytics.
+Grafana utilise une identité managée avec `Monitoring Data Reader` sur le
+workspace uniquement. Les identités `admin_object_ids` reçoivent `Grafana
+Admin`. Endpoint Grafana et requêtes Prometheus sont publics mais
+authentifiés Entra ; pas d'accès anonyme ni de clé API Grafana. L'API AKS
+reste privée et la CI ne reçoit aucun droit supplémentaire.
+
+**HPA et Prometheus ont deux circuits indépendants** : le HPA consulte
+Metrics Server (`metrics.k8s.io`), pas Managed Prometheus. La cible CPU
+60 % est relative aux **requests** (100m) : environ 60m par replica en
+moyenne, pas 60 % de la limite 250m.
+
+## Résilience déclarative
+
+- Pool user : **min 1 / max 5**, mais **un seul node en pratique**. Le quota
+  `standardDDSv6Family` de francecentral est à 10 vCPU (system 2×2 + user
+  1×4 = 8) et son augmentation est refusée en libre-service
+  (`QuotaNotAvailableForResource`, même à 16). Le max à 5 est conservé pour
+  le jour où le quota sera relevé.
+- `demo-app` ciblé sur le pool user, répartition **préférentielle** par
+  hostname : `maxSkew=1`, `ScheduleAnyway`. Avec un seul node, tous les
+  replicas y sont : aucune résilience à la perte d'un node. La contrainte
+  reprendra son effet dès qu'un deuxième node existe ; repasser alors en
+  `DoNotSchedule` + `minDomains=2` pour une garantie stricte.
+- HPA `autoscaling/v2` : **2 à 5 replicas**, CPU **60 %**, croissance
+  limitée à deux pods par minute ; réduction limitée à un pod par minute,
+  avec fenêtre de stabilisation de 300 s.
+- PDB `policy/v1` : **minAvailable=1**.
+- Rolling update : `maxUnavailable=0`, `maxSurge=1`.
+- `spec.replicas` absent de la cible Git : le HPA gère ce champ, Flux ne
+  doit pas ramener périodiquement le Deployment à deux replicas.
+
+Le PDB protège les **évictions volontaires** (drain), pas une suppression
+directe de pod ni une panne brutale. Le cluster autoscaler répond aux pods
+non planifiables, pas directement à la CPU. Ici, s'il tente un scale-out
+(pods Pending faute de CPU sur le node), la création échoue sur le quota :
+événements `FailedScaleUp`/`NotTriggerScaleUp` attendus, pods Pending
+jusqu'au scale-down du HPA. Ce n'est pas une panne du cluster.
+
+**Limite connue — mise à jour du pool user** : la surge (33 % d'un node =
+un D4ds_v6 de plus) dépasse le quota, et `max_unavailable` sans surge
+serait bloqué par le PDB (les pods évincés n'ont aucun autre node). Une
+mise à jour de version du pool user nécessitera un quota temporaire ou une
+coupure acceptée.
+
+## Déploiement — ne pas pousser toute la bascule d'un seul coup
+
+1. Vérifier AKS `Running`, les quotas vCPU (régional **et** par famille de
+   VM, surge comprise) et le coût de Grafana Standard X1. Enregistrer les
+   providers manquants, avec accord explicite :
+   ```powershell
+   az provider register --namespace Microsoft.Monitor --wait
+   az provider register --namespace Microsoft.Dashboard --wait
+   ```
+   Vérifier aussi `Microsoft.Insights` et `Microsoft.AlertsManagement`.
+   Terraform exige au moins une identité dans `admin_object_ids`.
+2. `terraform plan` puis `terraform apply` après revue : pas de remplacement
+   du cluster. Vérifier le node user Ready et les agents `ama-metrics`.
+3. Pour éviter une baisse transitoire à un replica lors du transfert de
+   propriété du champ `replicas`, faire **deux commits GitOps** :
+   - premier commit : HPA, PDB et répartition, en conservant temporairement
+     `spec.replicas: 2` dans le Deployment ; attendre HPA sain, deux replicas
+     Ready et Flux Compliant ;
+   - second commit : retirer `spec.replicas` (état cible fourni ici), puis
+     vérifier le HPA et `metadata.managedFields`.
+   Ne pas utiliser un `kubectl scale` comme état durable. Tester que Flux
+   ne remet pas la valeur à deux pendant une montée en charge.
+4. Vérifier le secret CSI **sur les nouveaux pods**, sans afficher sa valeur,
+   puis importer le dashboard et réaliser les tests ci-dessous.
+   Aucun test perturbateur n'est déclenché par le workflow CI.
+
+## Accès Grafana et métriques
+
+```powershell
+terraform output -raw grafana_endpoint
+terraform output -raw prometheus_query_endpoint
+.\scripts\test-resilience.ps1 -Scenario Diagnose
+```
+
+Ouvrir l'endpoint Grafana et se connecter avec une identité autorisée dans
+Entra. Importer `dashboards/aks-phase6.json` dans Grafana, sélectionner
+la source **Azure Managed Prometheus** associée, puis le cluster.
+Ce dashboard versionné utilise les métriques brutes (CPU, mémoire,
+replicas, HPA et redémarrages), sans dépendre des recording rules
+des dashboards communautaires. Les données et chaque panneau doivent
+être vérifiés après apply ; un dashboard sans données n'est pas un succès.
+
+Dans Explore (source Prometheus), vérifier des séries **récentes** :
+```promql
+up
+kube_deployment_status_replicas_available{namespace="demo-app",deployment="demo-app"}
+kube_horizontalpodautoscaler_status_desired_replicas{namespace="demo-app",horizontalpodautoscaler="demo-app"}
+sum by (pod) (rate(container_cpu_usage_seconds_total{namespace="demo-app",container="demo-app"}[5m]))
+```
+
+Ajouter le filtre `cluster` affiché dans Grafana si le workspace collecte
+plusieurs clusters. Pas d'exporter nginx ni de métriques HTTP applicatives :
+la sonde du test mesure les réponses HTTP séparément.
+
+## Tests contrôlés depuis PowerShell
+
+`scripts/test-resilience.ps1` utilise `az aks command invoke`, avec ton
+identité d'administration, pas celle de la CI. `Diagnose` ne modifie pas
+les workloads applicatifs (command invoke crée son pod technique).
+Les autres scénarios demandent confirmation ; `-WhatIf` n'exécute rien.
+
+Préparer **avec accord explicite** une image BusyBox de test dans ACR
+(par exemple version 1.37.0), vérifier sa provenance et son scan, récupérer
+son digest, puis fournir la référence immuable :
+```powershell
+$image = "acraksdemodeva3b521.azurecr.io/phase6/busybox@sha256:<digest>"
+.\scripts\test-resilience.ps1 -Scenario Load -TestImage $image -WhatIf
+.\scripts\test-resilience.ps1 -Scenario Load -TestImage $image -DurationSeconds 300 -Concurrency 8
+.\scripts\test-resilience.ps1 -Scenario DeletePod -TestImage $image -PodName "<pod-demo-app>"
+.\scripts\test-resilience.ps1 -Scenario Drain -TestImage $image -NodeName "<node-user>" -DurationSeconds 300
+```
+
+Les Jobs temporaires sont non-root, limités en ressources, sans token API
+ni secret CSI, dans `demo-app` pour réutiliser DNS et les règles réseau
+intra-namespace. Ils sont hors des chemins réconciliés par Flux. Les noms
+sont uniques par exécution ; nettoyage en `finally`, TTL et deadline
+complètent la protection si le processus est interrompu.
+
+- **Load** : charge HTTP bornée (1–32 workers, 30–600 s). Le script exige un
+  scale-out mesuré (`desiredReplicas > 2` et plus de deux replicas Ready,
+  sans dépasser cinq), sinon il échoue. nginx statique peut ne pas saturer
+  à faible charge : ajuster la concurrence dans les limites, sans déclarer
+  un succès fictif. Vérifier ensuite le retour à deux et l'absence de conflit
+  avec Flux après la stabilisation.
+- **DeletePod** : un seul pod explicitement nommé, appartenant à un
+  ReplicaSet de demo-app ; observer remplacement et secret CSI.
+- **Drain** : un seul node user explicitement nommé ; **refusé tant qu'il
+  n'y a pas au moins deux nodes user planifiables** (avec un seul node, les
+  pods évincés n'auraient nulle part où aller et le PDB bloquerait le drain).
+  Non exécutable avec le quota actuel. Inspecter les pods
+  et PDB de **tous** ses namespaces avant de confirmer ; le drain peut
+  déplacer d'autres workloads. Il utilise l'éviction et respecte les PDB,
+  sans `--force` ni contournement. `--delete-emptydir-data` supprime les
+  données éphémères des pods évincés : ne pas lancer si d'autres workloads
+  en dépendent. Un drain bloqué échoue, il n'est pas forcé. Le script remet
+  le node planifiable, puis vérifie la récupération du Deployment.
+
+La sonde affiche codes HTTP, nombre de tentatives et échecs ; toute erreur
+HTTP/réseau rend le test non réussi. Vérifier aussi pendant la perturbation
+qu'au moins un replica reste Ready. Ce test d'éviction volontaire ne
+simule pas une panne brutale de VM.
+
+## Critères de fin et retour arrière
+
+Phase terminée uniquement après : Grafana accessible via Entra, métriques
+récentes, Flux Compliant, HPA sain et scale-out/down mesurés, PDB présent,
+sonde HTTP sans erreur, secret CSI non vide, aucun Job de test résiduel.
+Répartition multi-nodes et drain : reportés tant que le quota impose un
+seul node user. Conserver les résultats des tests.
+
+Rollback applicatif : `git revert` des commits Phase 6 ; réintroduire
+`replicas: 2` si le HPA est retiré.
+Retirer l'observabilité nécessite un plan Terraform revu ; cela détruit
+Grafana et le workspace, donc potentiellement les dashboards et les métriques.
+
+**Coûts** : Grafana, le workspace et les autres ressources Azure ne sont pas
+arrêtés par `az aks stop`. Ne pas confondre arrêt AKS et destruction de
+l'observabilité.

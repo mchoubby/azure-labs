@@ -64,10 +64,17 @@ variable "user_node_min_count" {
   default     = 1
 }
 
+# Le quota standardDDSv6Family (10 vCPU en francecentral, 8 utilisés) bloque
+# en pratique tout node user au-delà du premier, malgré max_count = 5.
 variable "user_node_max_count" {
   description = "Max nodes du pool user (autoscaling)"
   type        = number
   default     = 5
+
+  validation {
+    condition     = var.user_node_max_count >= var.user_node_min_count
+    error_message = "user_node_max_count doit être supérieur ou égal à user_node_min_count."
+  }
 }
 
 variable "user_node_vm_size" {

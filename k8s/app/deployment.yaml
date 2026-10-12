@@ -6,7 +6,13 @@ metadata:
   labels:
     app: demo-app
 spec:
+  # Temporaire (commit 1 Phase 6) : retiré au commit 2, le HPA gère ensuite ce champ
   replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   selector:
     matchLabels:
       app: demo-app
@@ -16,6 +22,16 @@ spec:
         app: demo-app
         azure.workload.identity/use: "true"
     spec:
+      nodeSelector:
+        kubernetes.azure.com/agentpool: user
+      # Préférence seulement : un seul node user tant que le quota DDSv6 est bloqué
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: demo-app
       automountServiceAccountToken: false
       serviceAccountName: demo-app
       securityContext:

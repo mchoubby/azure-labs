@@ -34,6 +34,8 @@ resource "azurerm_kubernetes_cluster" "main" {
   oidc_issuer_enabled       = true
   workload_identity_enabled = true
 
+  monitor_metrics {}
+
   # Add-on Azure Policy : installe Gatekeeper (gatekeeper-system) et applique
   # les assignments Azure Policy scopés sur ce cluster (modules/policy).
   azure_policy_enabled = true

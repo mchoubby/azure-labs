@@ -121,3 +121,16 @@ module "gitops" {
     WORKLOAD_IDENTITY_CLIENT_ID = module.key_vault.workload_identity_client_id
   }
 }
+
+module "monitoring" {
+  source = "./modules/monitoring"
+
+  resource_group_name = azurerm_resource_group.main.name
+  location            = azurerm_resource_group.main.location
+  project_name        = var.project_name
+  environment         = var.environment
+  aks_cluster_id      = module.aks.cluster_id
+  aks_cluster_name    = module.aks.cluster_name
+  admin_object_ids    = var.admin_object_ids
+  tags                = var.tags
+}
