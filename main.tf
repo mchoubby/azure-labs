@@ -18,6 +18,7 @@ module "network" {
   aks_nodes_subnet_cidr         = var.aks_nodes_subnet_cidr
   private_endpoints_subnet_cidr = var.private_endpoints_subnet_cidr
   appgw_subnet_cidr             = var.appgw_subnet_cidr
+  ingress_enabled               = var.ingress_enabled
 
   tags = var.tags
 }
@@ -113,6 +114,15 @@ module "gitops" {
 
   aks_cluster_id    = module.aks.cluster_id
   github_repository = var.github_repository
+  ingress_enabled   = var.ingress_enabled
+  ingress_substitutions = var.ingress_enabled ? {
+    ALB_CLIENT_ID     = module.ingress[0].controller_client_id
+    ALB_ID            = module.ingress[0].alb_id
+    ALB_FRONTEND_NAME = module.ingress[0].frontend_name
+    ALB_FQDN          = module.ingress[0].frontend_fqdn
+    ALB_SUBNET_CIDR   = var.appgw_subnet_cidr
+    WAF_POLICY_ID     = module.ingress[0].waf_policy_id
+  } : {}
 
   app_substitutions = {
     KEY_VAULT_NAME              = module.key_vault.key_vault_name
@@ -120,6 +130,23 @@ module "gitops" {
     TENANT_ID                   = data.azurerm_client_config.current.tenant_id
     WORKLOAD_IDENTITY_CLIENT_ID = module.key_vault.workload_identity_client_id
   }
+
+  depends_on = [module.ingress]
+}
+
+module "ingress" {
+  count  = var.ingress_enabled ? 1 : 0
+  source = "./modules/ingress"
+
+  resource_group_name        = azurerm_resource_group.main.name
+  location                   = azurerm_resource_group.main.location
+  project_name               = var.project_name
+  environment                = var.environment
+  subnet_id                  = module.network.appgw_subnet_id
+  aks_oidc_issuer_url        = module.aks.oidc_issuer_url
+  node_resource_group_id     = module.aks.node_resource_group_id
+  log_analytics_workspace_id = module.aks.log_analytics_workspace_id
+  tags                       = var.tags
 }
 
 module "monitoring" {

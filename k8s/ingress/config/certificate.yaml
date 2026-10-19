@@ -1,0 +1,26 @@
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: demo-selfsigned
+  namespace: demo-app
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: demo-ingress
+  namespace: demo-app
+spec:
+  secretName: demo-ingress-tls
+  duration: 2160h
+  renewBefore: 360h
+  dnsNames:
+    - "${ALB_FQDN}"
+  privateKey:
+    algorithm: RSA
+    size: 2048
+    rotationPolicy: Always
+  issuerRef:
+    name: demo-selfsigned
+    kind: Issuer

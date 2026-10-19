@@ -1,0 +1,13 @@
+apiVersion: alb.networking.azure.io/v1
+kind: WebApplicationFirewallPolicy
+metadata:
+  name: demo-ingress
+  namespace: demo-app
+spec:
+  targetRef:
+    group: gateway.networking.k8s.io
+    kind: Gateway
+    name: demo-ingress
+    namespace: demo-app
+  webApplicationFirewall:
+    id: "${WAF_POLICY_ID}"

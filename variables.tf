@@ -40,6 +40,17 @@ variable "appgw_subnet_cidr" {
   default     = "10.20.3.0/24"
 }
 
+variable "ingress_enabled" {
+  description = "Active la Phase 7 : AGC public, WAF et reconciliation Flux (couts supplementaires)"
+  type        = bool
+  default     = false
+
+  validation {
+    condition     = !var.ingress_enabled || can(regex("/24$", var.appgw_subnet_cidr))
+    error_message = "Application Gateway for Containers avec CNI Overlay exige un subnet /24."
+  }
+}
+
 variable "kubernetes_version" {
   description = "Version de Kubernetes pour le cluster AKS"
   type        = string

@@ -1,5 +1,60 @@
 # Phase 1 — Fondations réseau et cluster AKS
 
+## Mise en pause et reprise du lab — 19 octobre 2026
+
+Suppression complète demandée pour arrêter les coûts, **backend Terraform
+inclus**. Les phases ci-dessous décrivent l'architecture et l'historique du
+lab, pas une infrastructure à supposer encore déployée. La Phase 7 reste
+préparée mais non appliquée ; `ingress_enabled` reste désactivé par défaut.
+
+**Suppression terminée et vérifiée le 19 octobre 2026** : aucun resource
+group ni aucune ressource active retournés par Azure dans la souscription
+du lab, backend et Network Watcher compris. Le state Terraform final ne
+contient plus de ressources. AKS a été supprimé sans redémarrage ; Flux a
+nécessité une suppression forcée côté ARM sur le cluster arrêté, puis une
+nouvelle destruction Terraform a réconcilié le state. La solution Container
+Insights orpheline a également été supprimée.
+
+Sauvegarde locale hors dépôt, avec accès Windows limité à l'utilisateur et
+à SYSTEM : `C:\Users\moham\azure-labs-backups\2026-10-19-teardown`.
+Elle contient les states avant destruction (`before-destroy.tfstate`) et
+après destruction (`after-destroy.tfstate`, vide), les paramètres du backend,
+les variables Terraform et les modifications locales de la Phase 7.
+Les anciens states et plans locaux ont été déplacés dans
+`old-local-artifacts` pour éviter leur réutilisation accidentelle.
+**Le state avant destruction contient une clé privée Flux : ne pas le
+committer ni le partager.** Les images ACR et les données applicatives ne
+sont pas sauvegardées par le state.
+
+### Pour reprendre ultérieurement
+
+1. Reconnecter Azure CLI à la bonne souscription. Recréer le stockage du
+   backend et le conteneur `tfstate` avec l'authentification Entra ; attribuer
+   `Storage Blob Data Contributor` **avant** de créer le conteneur, puis
+   attendre la propagation RBAC. Le script `scripts/bootstrap-backend.sh`
+   fournit les paramètres, mais son ordre conteneur/rôle doit être adapté
+   si l'utilisateur n'a pas déjà les droits data-plane.
+2. Actualiser `backend.hcl` avec le nouveau nom de stockage, puis exécuter
+   `terraform init -reconfigure -backend-config=backend.hcl`. Repartir d'un
+   state vide : **ne pas restaurer le state avant destruction** et ne pas
+   réutiliser les anciens plans.
+3. Revoir les coûts, les quotas régionaux et les versions avant un nouveau
+   `terraform plan`, puis un `terraform apply` explicite. Un redémarrage ne
+   suffit pas : le cluster doit être recréé.
+4. Actualiser les variables GitHub de l'environnement `dev` depuis
+   `terraform output github_actions_variables` (les identités changent).
+   Remplacer l'ancienne deploy key Flux par la nouvelle, en conservant
+   l'ordre GitOps décrit en Phase 5.
+5. Reconstruire et publier l'image dans le nouvel ACR, actualiser le digest
+   GitOps via la CI et recréer le secret applicatif dans Key Vault via un
+   accès privé. L'ancien digest Git ne suffit pas à restaurer l'image.
+6. Revalider Flux, les pods, CSI et l'observabilité avant d'activer la Phase 7.
+
+Le coffre `kvaksdemodeva3b521` est en suppression logique avec protection
+contre la purge jusqu'au **17 janvier 2027**. Avant cette date, prévoir sa
+récupération avec vérification du plan Terraform et de ses accès, ou un nom
+différent ; ne pas tenter de contourner la protection contre la purge.
+
 ## Ce que ce module provisionne
 - Un Resource Group + VNet avec 3 subnets (nodes AKS, private endpoints, App Gateway)
 - Un cluster AKS **privé**, en **Azure CNI Overlay**, avec **Calico** pour les Network Policies
@@ -316,15 +371,26 @@ coupure acceptée.
    Terraform exige au moins une identité dans `admin_object_ids`.
 2. `terraform plan` puis `terraform apply` après revue : pas de remplacement
    du cluster. Vérifier le node user Ready et les agents `ama-metrics`.
-3. Pour éviter une baisse transitoire à un replica lors du transfert de
-   propriété du champ `replicas`, faire **deux commits GitOps** :
+3. Bascule en **deux commits GitOps** :
    - premier commit : HPA, PDB et répartition, en conservant temporairement
      `spec.replicas: 2` dans le Deployment ; attendre HPA sain, deux replicas
      Ready et Flux Compliant ;
    - second commit : retirer `spec.replicas` (état cible fourni ici), puis
      vérifier le HPA et `metadata.managedFields`.
-   Ne pas utiliser un `kubectl scale` comme état durable. Tester que Flux
-   ne remet pas la valeur à deux pendant une montée en charge.
+
+   **Constaté au déploiement réel** : les deux commits ne suffisent pas à
+   éviter la baisse transitoire. Le HPA n'écrit `replicas` (via `/scale`)
+   que s'il **change** la valeur ; à 2 = minReplicas il n'écrit rien, donc
+   `kustomize-controller` reste seul propriétaire du champ. Quand il le
+   retire de son apply SSA, l'API server le remet à sa valeur par défaut
+   (**1**) : un pod supprimé, puis recréé ~5 s plus tard par le HPA
+   (`Current number of replicas below Spec.MinReplicas`). Le PDB ne
+   protège pas ce cas (pas une éviction). Pour une bascule sans baisse :
+   dans le commit 1, mettre `minReplicas` au-dessus du `replicas` Git
+   (ex. 3) afin que le HPA écrive le champ et en devienne copropriétaire,
+   puis retirer `replicas` et revenir à `minReplicas: 2`.
+   Ensuite, `kustomize-controller` ne possède plus `spec.replicas` : Flux ne
+   le remet plus à deux. Ne pas utiliser un `kubectl scale` comme état durable.
 4. Vérifier le secret CSI **sur les nouveaux pods**, sans afficher sa valeur,
    puis importer le dashboard et réaliser les tests ci-dessous.
    Aucun test perturbateur n'est déclenché par le workflow CI.
@@ -380,6 +446,10 @@ ni secret CSI, dans `demo-app` pour réutiliser DNS et les règles réseau
 intra-namespace. Ils sont hors des chemins réconciliés par Flux. Les noms
 sont uniques par exécution ; nettoyage en `finally`, TTL et deadline
 complètent la protection si le processus est interrompu.
+Les commandes shell des Jobs sont normalisées en LF avant sérialisation
+JSON : les fins de ligne Windows CRLF provoquent des erreurs de syntaxe
+dans BusyBox. Si la sonde ne devient pas Ready, le script affiche ses
+descriptions et logs avant de la supprimer.
 
 - **Load** : charge HTTP bornée (1–32 workers, 30–600 s). Le script exige un
   scale-out mesuré (`desiredReplicas > 2` et plus de deux replicas Ready,
@@ -421,3 +491,153 @@ Grafana et le workspace, donc potentiellement les dashboards et les métriques.
 **Coûts** : Grafana, le workspace et les autres ressources Azure ne sont pas
 arrêtés par `az aks stop`. Ne pas confondre arrêt AKS et destruction de
 l'observabilité.
+
+---
+
+# Phase 7 — Entree publique HTTPS, Gateway API et WAF
+
+**Etat : code prepare, pas applique.** `ingress_enabled = false` par
+defaut : pousser les fichiers ne cree pas de point d'entree public.
+La Phase 6 est cloturee a la demande de Med : Grafana et cinq panneaux
+avec donnees recentes, test Load reussi selon son retour (scale-out > 2
+Ready, FAILED=0). DeletePod non verifie, drain reporte et controles
+post-test non executes car AKS etait stoppe.
+
+## Architecture et ownership
+
+```text
+Internet -> frontend AGC :443 -> WAF Prevention -> pods demo-app :8080
+             :80 -> redirection HTTPS
+Terraform : AGC + frontend + association subnet + SecurityPolicy + WAF
+            UAMI/federation/RBAC + diagnostics vers le Log Analytics existant
+Flux      : charts ALB/cert-manager + Certificate + Gateway + HTTPRoutes
+            association WAF + politique TLS + NetworkPolicy applicative
+```
+
+- **Application Gateway for Containers**, pas Application Gateway WAF_v2
+  classique ni AGIC. Le dataplane Azure atteint directement les IP pods
+  via l'integration CNI Overlay ; le Service reste ClusterIP et l'API AKS
+  reste privee.
+- **BYO** : Terraform possede le cycle de vie Azure. Le Gateway reference
+  l'ID AGC et le frontend existants ; aucune CR `ApplicationLoadBalancer`
+  ne demande au controleur de creer une infrastructure concurrente.
+- Subnet existant `snet-appgw`, **exactement /24**, meme VNet que les
+  nodes, delegue a `Microsoft.ServiceNetworking/trafficControllers`.
+- ALB Controller **1.12.2** et cert-manager **v1.21.2**, charts OCI officiels
+  epingles par digest. Le nouvel add-on ALB AKS est encore en preview :
+  installation Helm par Flux, sans add-on preview ni provider Kubernetes
+  Terraform qui devrait joindre l'API privee.
+- Les controleurs et hooks vont sur les nodes system avec la toleration
+  `CriticalAddonsOnly`. Surveiller leur capacite disponible (deux D2ds_v6).
+- UAMI dediee federee au SA `azure-alb-system/alb-controller-sa` ;
+  Configuration Manager scope a l'AGC, Network Contributor au seul subnet,
+  Reader au node resource group. Aucun nouveau droit pour la CI.
+- Flux installe les charts avant les CR avec deux Kustomizations dependantes,
+  `ingress-controllers` puis `ingress-config` (wait et timeout 10 min).
+- NetworkPolicy additive : subnet AGC uniquement vers `demo-app:8080`.
+  Les regles intra-namespace et deny-by-default existantes restent intactes.
+  Verifier le comportement effectif de Calico/CNI Overlay au deploiement ;
+  ne pas ouvrir tout le VNet pour contourner une erreur 502.
+
+## TLS de demonstration et WAF
+
+Pas de domaine a acheter : utiliser le **FQDN fourni par le frontend AGC**.
+cert-manager genere le certificat auto-signe avec ce FQDN comme SAN,
+valide 90 jours et renouvelle 15 jours avant expiration, avec rotation de cle.
+Le Secret `demo-ingress-tls` est cree dans Kubernetes, pas dans Git ni dans
+le state Terraform. Les permissions Kubernetes permettant de lire des
+Secrets restent sensibles.
+
+Le navigateur affiche un avertissement de confiance : **chiffrement ne
+signifie pas certificat public de confiance**. Le script de validation
+recupere uniquement le certificat public via l'acces admin authentifie et
+utilise `curl --cacert`, jamais `-k`. Cette confiance locale doit etre
+renouvelee lors de la rotation du certificat. Pour une vraie application :
+domaine + certificat public, hors du perimetre de cette demonstration.
+
+- TLS policy `2023-06-S` (TLS 1.2 minimum).
+- Terminaison TLS sur AGC, HTTP vers nginx : pas de TLS end-to-end dans ce lab.
+- WAF **Prevention**, Microsoft DRS **2.1** (pas OWASP CRS, non supporte
+  sur AGC). SecurityPolicy Azure autorise l'association ; la CR
+  `WebApplicationFirewallPolicy` l'applique au Gateway.
+- Regle de validation non offensive : `X-Demo-WAF-Test: block` doit
+  retourner **403**, la meme requete sans cet en-tete doit retourner **200**.
+  Cela prouve le raccordement WAF, pas l'efficacite de toutes les regles DRS.
+
+## Ordre de deploiement (manuel)
+
+1. Relire les changements, commiter et pousser **tous** les fichiers Phase 7
+   avant activation Terraform. Ne pas pousser de state, plan, tfvars local
+   ou Secret TLS. Conserver `ingress_enabled = false` pendant ce push.
+2. Revoir les couts : AGC, frontend, capacite, WAF, ingestion/retention des logs.
+   Ils ne sont pas supprimes par `az aks stop`. Aucun prix fixe garanti ici :
+   utiliser le calculateur Azure pour francecentral.
+3. Avec accord explicite, enregistrer les providers manquants (constates
+   NotRegistered lors de la preparation) :
+   ```powershell
+   az provider register --namespace Microsoft.ServiceNetworking --wait
+   az provider register --namespace Microsoft.NetworkFunction --wait
+   ```
+4. Redemarrer AKS s'il est stoppe et attendre Running/Succeeded :
+   ```powershell
+   az aks start -g rg-aksdemo-dev -n aks-aksdemo-dev
+   ```
+5. Ajouter `ingress_enabled = true` dans le tfvars local, puis :
+   ```powershell
+   terraform init
+   terraform plan -out=tfplan-phase7
+   terraform apply tfplan-phase7
+   ```
+   Plan attendu de la preparation : **11 creations, 2 modifications,
+   0 destruction** (delegation subnet et configuration Flux). Aucun
+   remplacement AKS ni changement de taille/nombre des nodes.
+   Les roles peuvent necessiter quelques minutes de propagation ; inspecter
+   les logs ALB si l'authentification echoue.
+6. Lire les conditions Flux, HelmRelease, Certificate, Gateway et HTTPRoute
+   via `az aks command invoke`. Ne pas se limiter au statut ARM Compliant :
+   les deux Kustomizations enfants doivent etre Ready, et les listeners
+   Accepted/ResolvedRefs/Programmed sur la generation courante.
+7. Tester depuis Windows :
+   ```powershell
+   terraform output -raw ingress_url
+   .\scripts\test-ingress.ps1
+   ```
+   Le script ne modifie pas les workloads. Il lit les ressources et le
+   certificat **public**, puis envoie trois requetes : HTTP -> HTTPS **301**,
+   HTTPS `/healthz` **200** avec validation TLS, test WAF **403**.
+   `command invoke` cree son pod technique habituel.
+
+## Logs, verification et rollback
+
+Diagnostic setting `allLogs` + `AllMetrics` sur AGC, vers le workspace
+Log Analytics AKS existant (pas le workspace Prometheus). Verifier dans
+Logs les categories access/firewall apres les requetes (delai d'ingestion).
+Exemple pour le mode AzureDiagnostics configure par defaut :
+
+```kusto
+AzureDiagnostics
+| where TimeGenerated > ago(30m)
+| where ResourceProvider =~ "MICROSOFT.SERVICENETWORKING"
+| summarize Nombre=count() by Category
+```
+
+Phase terminee seulement apres : HTTPS valide avec confiance explicite,
+redirection correcte, blocage WAF observe et log correspondant, Flux et
+controleurs Ready, backend sain, Service toujours ClusterIP sans autre
+endpoint public de l'application. Aucune validation reelle Phase 7
+effectuee tant qu'elle n'est pas appliquee. Alertes HTTP et certificat
+public de production : evolutions ulterieures, pas deja configurees.
+
+Rollback en deux temps : retirer d'abord les ressources de routage/TLS/WAF
+Kubernetes et attendre le prune Flux, puis retirer les controleurs si
+inutilises, **avant** de mettre `ingress_enabled = false` et d'appliquer
+la destruction Azure. Ne pas detruire le dataplane sous un Gateway actif.
+Les CRD Helm et le Secret TLS peuvent etre conserves apres suppression :
+verifier leurs proprietaires et nettoyer explicitement les seuls objets
+Phase 7 devenus inutiles. Ne jamais supprimer le namespace `demo-app`.
+
+References officielles :
+- [AGC et CNI Overlay](https://learn.microsoft.com/en-us/azure/application-gateway/for-containers/container-networking)
+- [Installation ALB Helm](https://learn.microsoft.com/en-us/azure/application-gateway/for-containers/quickstart-deploy-application-gateway-for-containers-alb-controller-helm)
+- [WAF et limitations](https://learn.microsoft.com/en-us/azure/application-gateway/for-containers/web-application-firewall)
+- [TLS policy](https://learn.microsoft.com/en-us/azure/application-gateway/for-containers/tls-policy)

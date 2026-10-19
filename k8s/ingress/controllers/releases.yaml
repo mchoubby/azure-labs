@@ -1,0 +1,105 @@
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: alb-controller
+  namespace: flux-system
+spec:
+  interval: 1h
+  url: oci://mcr.microsoft.com/application-lb/charts/alb-controller
+  ref:
+    # Chart officiel 1.12.2
+    digest: sha256:c18905f1313963068ce0479af8da852531331bba40ffb02683bb83daf517675a
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: alb-controller
+  namespace: flux-system
+spec:
+  interval: 10m
+  timeout: 10m
+  releaseName: alb-controller
+  targetNamespace: azure-alb-system
+  chartRef:
+    kind: OCIRepository
+    name: alb-controller
+  install:
+    crds: CreateReplace
+  upgrade:
+    crds: CreateReplace
+  values:
+    albController:
+      namespace: azure-alb-system
+      podIdentity:
+        clientID: "${ALB_CLIENT_ID}"
+      installGatewayApiCRDs: true
+      securityPolicyFeatureFlag: true
+      controller:
+        nodeSelector:
+          kubernetes.azure.com/agentpool: system
+        tolerations:
+          - key: CriticalAddonsOnly
+            operator: Exists
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: cert-manager
+  namespace: flux-system
+spec:
+  interval: 1h
+  url: oci://quay.io/jetstack/charts/cert-manager
+  ref:
+    # Chart officiel v1.21.2
+    digest: sha256:634dce9c13b56677a2c05e2ab76c312d0be2664022d5dd05815da67e1fd5f610
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: cert-manager
+  namespace: flux-system
+spec:
+  interval: 10m
+  timeout: 10m
+  releaseName: cert-manager
+  targetNamespace: cert-manager
+  chartRef:
+    kind: OCIRepository
+    name: cert-manager
+  install:
+    crds: CreateReplace
+  upgrade:
+    crds: CreateReplace
+  values:
+    crds:
+      enabled: true
+    nodeSelector: &systemSelector
+      kubernetes.azure.com/agentpool: system
+    tolerations: &systemTolerations
+      - key: CriticalAddonsOnly
+        operator: Exists
+    resources: &resources
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+    webhook:
+      nodeSelector: *systemSelector
+      tolerations: *systemTolerations
+      resources: *resources
+    cainjector:
+      nodeSelector: *systemSelector
+      tolerations: *systemTolerations
+      resources: *resources
+    startupapicheck:
+      nodeSelector: *systemSelector
+      tolerations: *systemTolerations
+      resources: *resources

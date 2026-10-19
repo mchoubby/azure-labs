@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: azure-alb-system
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cert-manager

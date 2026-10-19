@@ -62,4 +62,20 @@ resource "azurerm_kubernetes_flux_configuration" "main" {
   }
 
   depends_on = [azurerm_kubernetes_cluster_extension.flux]
+
+  dynamic "kustomizations" {
+    for_each = var.ingress_enabled ? [1] : []
+    content {
+      name                       = "ingress"
+      path                       = "./k8s/ingress"
+      depends_on                 = ["platform", "app"]
+      sync_interval_in_seconds   = var.sync_interval_in_seconds
+      retry_interval_in_seconds  = 60
+      timeout_in_seconds         = 600
+      garbage_collection_enabled = true
+      post_build {
+        substitute = var.ingress_substitutions
+      }
+    }
+  }
 }

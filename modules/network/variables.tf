@@ -34,3 +34,7 @@ variable "tags" {
   type    = map(string)
   default = {}
 }
+variable "ingress_enabled" {
+  type    = bool
+  default = false
+}

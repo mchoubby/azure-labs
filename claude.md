@@ -22,9 +22,16 @@ appli fintech-like. Plan en 6 phases :
 3. **CI/CD GitHub Actions avec OIDC** — ✅ fait (appliqué, pipeline vert de bout en bout)
 4. **DevSecOps** (Gatekeeper/OPA, Network Policies, Key Vault CSI) — ✅ fait (appliqué, pods 2/2, secret CSI monté)
 5. **GitOps** (Flux via extension AKS managée) — ✅ fait (Flux Compliant, déploiement par digest, CI sans droit Kubernetes)
-6. **Observabilité et résilience** — en cours (Managed Prometheus/Grafana, HPA, PDB, topology spread, tests manuels ; pas encore appliqué)
+6. **Observabilité et résilience** — ✅ clôturée à la demande de Med :
+   Grafana/métriques vérifiés, Load réussi selon son retour (scale-out > 2,
+   FAILED=0). DeletePod non vérifié, drain reporté, contrôles post-test
+   bloqués par AKS stoppé.
+7. **Entrée HTTPS et WAF** — code préparé, non appliqué : Application Gateway
+   for Containers + Gateway API, certificat auto-signé sans domaine,
+   Terraform BYO + charts ALB/cert-manager via Flux. Activation explicite
+   `ingress_enabled = true`, désactivée par défaut.
 
-## Architecture actuelle (Phases 1-5)
+## Architecture actuelle (Phases 1-6 + Phase 7 optionnelle)
 
 ```
 *.tf (racine)       # root module — assemble les modules (pas encore de découpage envs/)
@@ -38,11 +45,13 @@ modules/policy/     # Azure Policy (Gatekeeper) : PSS baseline cluster, restrict
 modules/key-vault/  # Key Vault RBAC privé (PE), UAMI applicative fédérée au SA demo-app
 modules/gitops/     # extension microsoft.flux + flux configuration "gitops" + deploy key SSH (tls)
 modules/monitoring/ # Azure Monitor workspace, DCE/DCR, Managed Grafana et RBAC Entra (Phase 6)
+modules/ingress/    # AGC BYO, WAF, identité ALB et diagnostics (Phase 7, désactivée par défaut)
 .github/workflows/deploy.yml   # build → Trivy (sans accès Azure) → [env dev] push ACR →
                                # commit du digest dans k8s/app/kustomization.yaml → attente Flux Compliant (ARM)
 app/                           # appli de démo (nginx-unprivileged, /healthz sur 8080)
 k8s/platform/                  # Kustomization Flux "platform" : namespace + NetworkPolicies baseline
-k8s/app/                       # Kustomization Flux "app" : SA, SecretProviderClass, Deployment, Service, netpol
+k8s/app/                       # Kustomization Flux "app" : SA, SecretProviderClass, Deployment, Service, netpol, HPA/PDB
+k8s/ingress/                   # Flux enfants : charts ALB/cert-manager puis Gateway API/TLS/WAF/netpol
 ```
 
 ## Décisions techniques clés (à ne pas re-proposer de changer sans discussion)
@@ -101,6 +110,13 @@ k8s/app/                       # Kustomization Flux "app" : SA, SecretProviderCl
     `standardDDSv6Family` (francecentral) reste à 10 : `az quota update`
     renvoie `QuotaNotAvailableForResource`. D'où un seul node user.
     Vérifier avec `az vm list-usage -l francecentral` avant tout scale-out.
+12. **Retirer `spec.replicas` d'un manifest appliqué en SSA (Flux) le remet
+    à 1** si le HPA n'a jamais écrit le champ (il n'écrit que s'il change la
+    valeur). Constaté en Phase 6 : un pod supprimé puis recréé ~5 s après.
+    Forcer d'abord une écriture du HPA (minReplicas > replicas Git).
+13. **`az aks command invoke --command` depuis Windows** : `az` est un
+    `.cmd`, les `|`, `$()` et `{"\n"}` sont interprétés par cmd.exe.
+    Passer les scripts par `--file` (`--command "sh script.sh"`).
 
 ## Compromis assumés, à challenger si possible
 - ~~Contributor sur le cluster pour la CI~~ → remplacé par un rôle custom
@@ -118,8 +134,8 @@ k8s/app/                       # Kustomization Flux "app" : SA, SecretProviderCl
   (backend azurerm, auth Entra). Alternative : `local_auth_reference`.
 - **Flux cluster-admin** (RBAC Kubernetes du SA kustomize-controller) —
   durcissement possible par impersonation d'un ServiceAccount de namespace.
-- **Les deux pods demo-app sur le même node** : pas d'anti-affinité ni de
-  PDB — à traiter en Phase 6.
+- **Les pods demo-app sur le même node** : PDB présent depuis la Phase 6,
+  mais pas de résilience à la perte du node (quota DDSv6).
 - **Phase 6 retenue** : **un seul node user** en pratique (min 1 / max 5,
   quota DDSv6 bloqué : tout scale-out échoue), topology
   spread par hostname en `ScheduleAnyway` (préférence, effective seulement
@@ -140,8 +156,10 @@ Endpoint, secret Key Vault monté via CSI + Workload Identity. Azure Policy
 pilotée par `policy_effect` (`Audit` par défaut).
 
 ## Prochaine étape
-Phase 6 — observabilité Terraform appliquée (workspace, DCR, Grafana,
-`monitor_metrics`) ; pool user min 1 / max 5 (un seul node en pratique, quota). Basculer les
-manifestes GitOps en deux commits (HPA avec replicas=2, puis retrait de
-replicas). Valider métriques/Grafana, test de charge et suppression de pod ;
-drain reporté (un seul node user). Ne marquer terminé qu'après vérification réelle.
+Phase 7 — relire et pousser le code avant activation, revoir les coûts,
+enregistrer Microsoft.ServiceNetworking et Microsoft.NetworkFunction,
+redémarrer AKS avec accord puis plan/apply manuels. Attendu : 11 créations,
+2 modifications, 0 destruction. Voir README.
+Vérifier Flux enfants, charts, certificat, Gateway/routes, HTTPS 200,
+redirection 301, WAF 403 et logs. Aucun apply ni redémarrage effectué par
+l'assistant pendant la préparation. Phase 7 non terminée.

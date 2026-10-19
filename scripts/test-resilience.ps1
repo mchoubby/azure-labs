@@ -42,6 +42,7 @@ function Invoke-Cluster {
 function Start-TestJob {
     param([string]$Name, [string]$Command)
 
+    $Command = $Command.Replace("`r`n", "`n")
     $job = @{
         apiVersion = 'batch/v1'; kind = 'Job'
         metadata = @{ name = $Name; namespace = 'demo-app'; labels = @{ 'phase6-test' = $runId } }
@@ -136,7 +137,14 @@ echo "TOTAL=$total FAILED=$failed"
 test "$failed" -eq 0
 '@.Replace('DURATION', "$DurationSeconds")
     Start-TestJob -Name $probe -Command $probeCommand
-    Invoke-Cluster "kubectl wait -n demo-app --for=condition=Ready pod -l job-name=$probe --timeout=60s"
+    Invoke-Cluster @"
+if ! kubectl wait -n demo-app --for=condition=Ready pod -l job-name=$probe --timeout=60s; then
+  kubectl describe job -n demo-app $probe
+  kubectl describe pods -n demo-app -l job-name=$probe
+  kubectl logs -n demo-app job/$probe || echo 'Logs de la sonde indisponibles.' >&2
+  exit 1
+fi
+"@
 
     $availabilityMonitor = @"
 monitor_availability() {

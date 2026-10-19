@@ -1,0 +1,41 @@
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: ingress-controllers
+  namespace: flux-system
+spec:
+  interval: 1m
+  timeout: 10m
+  path: ./k8s/ingress/controllers
+  prune: true
+  wait: true
+  sourceRef:
+    kind: GitRepository
+    name: gitops
+  postBuild:
+    substitute:
+      ALB_CLIENT_ID: "${ALB_CLIENT_ID}"
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: ingress-config
+  namespace: flux-system
+spec:
+  interval: 1m
+  timeout: 10m
+  path: ./k8s/ingress/config
+  prune: true
+  wait: true
+  dependsOn:
+    - name: ingress-controllers
+  sourceRef:
+    kind: GitRepository
+    name: gitops
+  postBuild:
+    substitute:
+      ALB_ID: "${ALB_ID}"
+      ALB_FRONTEND_NAME: "${ALB_FRONTEND_NAME}"
+      ALB_FQDN: "${ALB_FQDN}"
+      ALB_SUBNET_CIDR: "${ALB_SUBNET_CIDR}"
+      WAF_POLICY_ID: "${WAF_POLICY_ID}"

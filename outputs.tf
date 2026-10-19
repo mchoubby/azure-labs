@@ -75,3 +75,11 @@ output "github_actions_variables" {
     FLUX_CONFIGURATION_NAME = module.gitops.flux_configuration_name
   }
 }
+output "ingress_fqdn" {
+  description = "FQDN public AGC (certificat auto-signe de demonstration)"
+  value       = var.ingress_enabled ? module.ingress[0].frontend_fqdn : null
+}
+
+output "ingress_url" {
+  value = var.ingress_enabled ? "https://${module.ingress[0].frontend_fqdn}" : null
+}

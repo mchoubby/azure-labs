@@ -18,3 +18,10 @@ output "kubelet_identity_object_id" {
   description = "Identité utilisée par les nodes — nécessaire en Phase 3 pour donner les droits de pull sur l'ACR"
   value       = azurerm_kubernetes_cluster.main.kubelet_identity[0].object_id
 }
+output "node_resource_group_id" {
+  value = azurerm_kubernetes_cluster.main.node_resource_group_id
+}
+
+output "log_analytics_workspace_id" {
+  value = azurerm_log_analytics_workspace.aks.id
+}
